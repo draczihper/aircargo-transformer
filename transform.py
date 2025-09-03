@@ -1,110 +1,175 @@
 import pandas as pd
+import os
 
-# -----------------------------
-# STEP 1: Define category map
-# -----------------------------
-category_map = {
-    "MEAT": ["meat", "nyama", "goat meat", "beef", "fresh meat", "chilled meat", "frozen meat", "pem"],
-    "FISH": ["fish", "samaki"],
-    "VEGETABLES": ["vegetable", "mboga"],
-    "AVOCADO": ["avocado", "parachichi"],
-    "FLOWERS": ["flower", "maua"],
-    "VALUABLES": ["valuable", "valu", "val"],
-    "COURIER": ["courier", "ems", "express"],
-    "CRABS/LOBSTER": ["crab", "lobster", "kamba"],
-    "PER/COL": ["perishable", "per", "col"],
-    "DG": ["dangerous", "dg", "hazard"],
-    "G. CARGO": ["general", "cargo", "gc"]  # fallback
+# ================================
+# Configuration
+# ================================
+INPUT_FILE = "Book1.xlsx"   # Raw system data
+OUTPUT_FILE = "Book2.xlsx"  # Clean formatted report
+UNCLASSIFIED_FILE = "unclassified_words.txt"
+
+# Mapping dictionary (extend as needed)
+CATEGORY_MAPPING = {
+    "meat": "MEAT",
+    "nyama": "MEAT",
+    "beef": "MEAT",
+    "goat": "MEAT",
+    "fish": "FISH",
+    "samaki": "FISH",
+    "crab": "CRABS/LOBSTER",
+    "lobster": "CRABS/LOBSTER",
+    "vegetable": "VEGETABLES",
+    "mboga": "VEGETABLES",
+    "avocado": "AVOCADO",
+    "flowers": "FLOWERS",
+    "maua": "FLOWERS",
+    "valuable": "VALUABLES",
+    "valuables": "VALUABLES",
+    "courier": "COURIER",
+    "mail": "P.O.MAIL",
+    "posta": "P.O.MAIL",
+    "mal": "P.O.MAIL",  # AWB containing "MAL"
+    "per": "PER/COL",
+    "col": "PER/COL",
+    "dg": "DG",
+    "hazard": "DG",
+    "general": "G. CARGO"
 }
 
-# -----------------------------
-# STEP 2: Classify function
-# -----------------------------
-def classify_goods(nature, shc):
-    text = str(nature).lower() + " " + str(shc).lower()
-    for category, keywords in category_map.items():
-        for kw in keywords:
-            if kw in text:
-                return category
-    return "G. CARGO"  # default if no match
+# SHC code mapping
+SHC_MAPPING = {
+    "PEM": "MEAT",
+    "PER": "PER/COL",
+    "COL": "PER/COL",
+    "DG": "DG",
+    "MAL": "P.O.MAIL",
+    "AVI": "AVOCADO",
+    "FLW": "FLOWERS",
+    "VAL": "VALUABLES"
+}
 
-# -----------------------------
-# STEP 3: Transform Book1 -> Book2
-# -----------------------------
-def transform_book1_to_book2(input_file, output_file):
-    # Load Book1
-    df = pd.read_excel(input_file)
 
-    # Standardize column names
-    df.columns = df.columns.str.strip().str.lower()
+# ================================
+# Functions
+# ================================
+def normalize_text(text):
+    """Lowercase and strip spaces for robust matching."""
+    if pd.isna(text):
+        return ""
+    return str(text).strip().lower()
 
-    # Create helper columns
-    df["CATEGORY"] = df.apply(lambda row: classify_goods(row.get("nature goods", ""), row.get("shcs", "")), axis=1)
-    df["SECTOR"] = df["origin"].astype(str) + "-" + df["dest"].astype(str)
 
-    # -----------------------------
-    # Aggregation logic
-    # -----------------------------
-    categories = list(category_map.keys())
+def classify_goods(nature_goods, shcs, awb):
+    """Classify a record into a cargo category with double-checking."""
 
-    grouped = df.groupby(["flight date", "carrier", "flight no."])
+    nature = normalize_text(nature_goods)
+    shc = normalize_text(shcs)
+    awb = normalize_text(awb)
 
-    results = []
-    for (date, airline, flight_no), group in grouped:
-        row = {
-            "DATE": date,
-            "AIRLINE": airline,
-            "FLIGHT No": flight_no,
-            #"SECTOR": sector,
-            "F/CATEGORY": "",  # leave empty for now
-        }
+    nature_category = None
+    shc_category = None
 
-        # Initialize numeric fields
-        for cat in categories:
-            row[cat] = 0
-            row[f"{cat} AWBs"] = 0              
+    # Try SHC mapping
+    for code, category in SHC_MAPPING.items():
+        if shc.startswith(code.lower()):
+            shc_category = category
+            break
 
-        # Process AWBs
-        for _, g in group.iterrows():
-            cat = g["CATEGORY"]
-            weight = g.get("weight", 0)
-            row[cat] += weight
-            row[f"{cat} AWBs"] += 1
+    # Try Nature of Goods mapping
+    for key, category in CATEGORY_MAPPING.items():
+        if key in nature:
+            nature_category = category
+            break
 
-        # Totals
-        row["TOTAL AWBs"] = group.shape[0]
-        row["TOTAL WEIGHT"] = group["weight"].sum()
+    # Try AWB check for mail
+    if "mal" in awb:
+        nature_category = "P.O.MAIL"
 
-        results.append(row)
+    # Decision logic
+    if shc_category and nature_category:
+        if shc_category == nature_category:
+            return shc_category
+        else:
+            # Conflict → log and default to G. CARGO
+            with open(UNCLASSIFIED_FILE, "a", encoding="utf-8") as f:
+                f.write(f"CONFLICT | AWB:{awb} | Nature:{nature_goods} | SHC:{shcs}\n")
+            return "G. CARGO"
 
-    # -----------------------------
-    # Create final DataFrame
-    # -----------------------------
-    final_df = pd.DataFrame(results)
+    if shc_category:
+        return shc_category
+    if nature_category:
+        return nature_category
 
-    # Reorder columns (Book2 format)
-    book2_columns = [
-        "DATE", "AIRLINE", "FLIGHT No", "SECTOR", "F/CATEGORY",
+    # If nothing matches → log and fallback
+    with open(UNCLASSIFIED_FILE, "a", encoding="utf-8") as f:
+        f.write(f"UNCLASSIFIED | AWB:{awb} | Nature:{nature_goods} | SHC:{shcs}\n")
+    return "G. CARGO"
+
+
+def transform():
+    # Read input
+    df = pd.read_excel(INPUT_FILE)
+
+    # Ensure SECTOR column is created
+    if "Origin" in df.columns and "Dest" in df.columns:
+        df["SECTOR"] = df["Origin"].astype(str) + "-" + df["Dest"].astype(str)
+    else:
+        df["SECTOR"] = ""  # fallback if not available
+
+    # Classify each record
+    df["CATEGORY"] = df.apply(
+        lambda row: classify_goods(row.get("Nature Goods", ""), row.get("SHCs", ""), row.get("AWB", "")),
+        axis=1
+    )
+
+    # Prepare output columns
+    categories = [
         "G. CARGO", "VEGETABLES", "AVOCADO", "FISH", "MEAT", "VALUABLES",
-        "FLOWERS", "PER/COL", "DG", "CRABS/LOBSTER", "P.O.MAIL", "COURIER",
-        "G. CARGO AWBs", "VALUABLES AWBs", "VEGETABLES AWBs", "AVOCADO AWBs",
-        "FISH AWBs", "MEAT AWBs", "COURIER AWBs", "CRABS/LOBSTER AWBs",
-        "FLOWERS AWBs", "PER/COL AWBs", "DG AWBs", "TOTAL AWBs", "TOTAL WEIGHT"
+        "FLOWERS", "PER/COL", "DG", "CRABS/LOBSTER", "P.O.MAIL", "COURIER"
     ]
 
-    # Add missing columns if not present
-    for col in book2_columns:
-        if col not in final_df.columns:
-            final_df[col] = 0
+    output_columns = [
+        "DATE", "AIRLINE", "FLIGHT No", "SECTOR", "F/CATEGORY"
+    ] + categories + \
+    [c + " AWBs" for c in categories] + ["TOTAL AWBs", "TOTAL WEIGHT"]
 
-    final_df = final_df[book2_columns]
+    # Aggregate
+    grouped = []
+    for keys, group in df.groupby(["Flight date", "Carrier", "Flight No.", "SECTOR"]):
+        record = {
+            "DATE": keys[0],
+            "AIRLINE": keys[1],
+            "FLIGHT No": keys[2],
+            "SECTOR": keys[3],
+            "F/CATEGORY": ""  # not implemented yet
+        }
 
-    # Save Book2
-    final_df.to_excel(output_file, index=False)
-    print(f"✅ Transformation complete! Saved to {output_file}")
+        total_awbs = 0
+        total_weight = 0
 
-# -----------------------------
-# STEP 4: Run
-# -----------------------------
+        for cat in categories:
+            cat_group = group[group["CATEGORY"] == cat]
+            weight_sum = cat_group["weight"].sum()
+            awb_count = cat_group["AWB"].nunique()
+
+            record[cat] = weight_sum
+            record[cat + " AWBs"] = awb_count
+
+            total_awbs += awb_count
+            total_weight += weight_sum
+
+        record["TOTAL AWBs"] = total_awbs
+        record["TOTAL WEIGHT"] = total_weight
+        grouped.append(record)
+
+    # Save output
+    output_df = pd.DataFrame(grouped, columns=output_columns)
+    output_df.to_excel(OUTPUT_FILE, index=False)
+    print(f"✅ Transformation complete! Saved to {OUTPUT_FILE}")
+
+
 if __name__ == "__main__":
-    transform_book1_to_book2("Book1.xlsx", "Book2.xlsx")
+    if not os.path.exists(INPUT_FILE):
+        print(f"❌ Input file {INPUT_FILE} not found.")
+    else:
+        transform()
