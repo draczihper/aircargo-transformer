@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+from datetime import datetime
 
 # ================================
 # Configuration
@@ -58,6 +59,16 @@ def normalize_text(text):
         return ""
     return str(text).strip().lower()
 
+def log_unclassified(entry): 
+    """"Log entry into unclassified_words.txt with timestamp header"""
+    header = f"/n==== Run on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ====\n"
+    # Add timestamp only if file is new or just created
+    if not os.path.exists(UNCLASSIFIED_FILE) or os.path.getsize(UNCLASSIFIED_FILE) == 0:
+        with open(UNCLASSIFIED_FILE, "a", encoding="utf-8") as f:
+            f.write(header)
+    with open(UNCLASSIFIED_FILE, "a", encoding="utf-8") as f:
+        f.write(entry + "\n")
+
 
 def classify_goods(nature_goods, shcs, awb):
     """Classify a record into a cargo category with double-checking."""
@@ -105,6 +116,22 @@ def classify_goods(nature_goods, shcs, awb):
         f.write(f"UNCLASSIFIED | AWB:{awb} | Nature:{nature_goods} | SHC:{shcs}\n")
     return "G. CARGO"
 
+def classify_flight_category(airline, flight_no):
+    """Classify flight as DOMESTIC, FOREIGN, or TC-FOREIGN."""
+    airline = str(airline).upper()
+    flight_no = str(flight_no)
+
+    if airline == "PW":
+        return "DOMESTIC"
+    if airline == "TC":
+        if flight_no.startswith("100"):
+            return "DOMESTIC"
+        elif flight_no.startswith("200") or flight_no.startswith("400"):
+            return "TC-FOREIGN"
+        else:
+            return "FOREIGN"
+    return "FOREIGN"
+
 
 def transform():
     # Read input
@@ -119,6 +146,12 @@ def transform():
     # Classify each record
     df["CATEGORY"] = df.apply(
         lambda row: classify_goods(row.get("Nature Goods", ""), row.get("SHCs", ""), row.get("AWB", "")),
+        axis=1
+    )
+
+        # Add flight category (DOMESTIC/FOREIGN/TC-FOREIGN)
+    df["F/CATEGORY"] = df.apply(
+        lambda row: classify_flight_category(row.get("Carrier", ""), row.get("Flight No.", "")),
         axis=1
     )
 
@@ -141,7 +174,7 @@ def transform():
             "AIRLINE": keys[1],
             "FLIGHT No": keys[2],
             "SECTOR": keys[3],
-            "F/CATEGORY": ""  # not implemented yet
+            "F/CATEGORY": keys[4] 
         }
 
         total_awbs = 0
