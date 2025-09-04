@@ -49,9 +49,8 @@ SHC_MAPPING = {
     "VAL": "VALUABLES"
 }
 
-
 # ================================
-# Functions
+# Utility Functions
 # ================================
 def normalize_text(text):
     """Lowercase and strip spaces for robust matching."""
@@ -59,9 +58,9 @@ def normalize_text(text):
         return ""
     return str(text).strip().lower()
 
-def log_unclassified(entry): 
-    """"Log entry into unclassified_words.txt with timestamp header"""
-    header = f"/n==== Run on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ====\n"
+def log_unclassified(entry):
+    """Log entry into unclassified_words.txt with timestamp header."""
+    header = f"\n==== Run on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ====\n"
     # Add timestamp only if file is new or just created
     if not os.path.exists(UNCLASSIFIED_FILE) or os.path.getsize(UNCLASSIFIED_FILE) == 0:
         with open(UNCLASSIFIED_FILE, "a", encoding="utf-8") as f:
@@ -69,10 +68,8 @@ def log_unclassified(entry):
     with open(UNCLASSIFIED_FILE, "a", encoding="utf-8") as f:
         f.write(entry + "\n")
 
-
 def classify_goods(nature_goods, shcs, awb):
     """Classify a record into a cargo category with double-checking."""
-
     nature = normalize_text(nature_goods)
     shc = normalize_text(shcs)
     awb = normalize_text(awb)
@@ -101,9 +98,7 @@ def classify_goods(nature_goods, shcs, awb):
         if shc_category == nature_category:
             return shc_category
         else:
-            # Conflict → log and default to G. CARGO
-            with open(UNCLASSIFIED_FILE, "a", encoding="utf-8") as f:
-                f.write(f"CONFLICT | AWB:{awb} | Nature:{nature_goods} | SHC:{shcs}\n")
+            log_unclassified(f"CONFLICT | AWB:{awb} | Nature:{nature_goods} | SHC:{shcs}")
             return "G. CARGO"
 
     if shc_category:
@@ -112,8 +107,7 @@ def classify_goods(nature_goods, shcs, awb):
         return nature_category
 
     # If nothing matches → log and fallback
-    with open(UNCLASSIFIED_FILE, "a", encoding="utf-8") as f:
-        f.write(f"UNCLASSIFIED | AWB:{awb} | Nature:{nature_goods} | SHC:{shcs}\n")
+    log_unclassified(f"UNCLASSIFIED | AWB:{awb} | Nature:{nature_goods} | SHC:{shcs}")
     return "G. CARGO"
 
 def classify_flight_category(airline, flight_no):
@@ -132,7 +126,9 @@ def classify_flight_category(airline, flight_no):
             return "FOREIGN"
     return "FOREIGN"
 
-
+# ================================
+# Main Transformation
+# ================================
 def transform():
     # Read input
     df = pd.read_excel(INPUT_FILE)
@@ -149,7 +145,7 @@ def transform():
         axis=1
     )
 
-        # Add flight category (DOMESTIC/FOREIGN/TC-FOREIGN)
+    # Add flight category (DOMESTIC/FOREIGN/TC-FOREIGN)
     df["F/CATEGORY"] = df.apply(
         lambda row: classify_flight_category(row.get("Carrier", ""), row.get("Flight No.", "")),
         axis=1
@@ -168,13 +164,13 @@ def transform():
 
     # Aggregate
     grouped = []
-    for keys, group in df.groupby(["Flight date", "Carrier", "Flight No.", "SECTOR"]):
+    for keys, group in df.groupby(["Flight date", "Carrier", "Flight No.", "SECTOR", "F/CATEGORY"]):
         record = {
             "DATE": keys[0],
             "AIRLINE": keys[1],
             "FLIGHT No": keys[2],
             "SECTOR": keys[3],
-            "F/CATEGORY": keys[4] 
+            "F/CATEGORY": keys[4]
         }
 
         total_awbs = 0
@@ -200,7 +196,9 @@ def transform():
     output_df.to_excel(OUTPUT_FILE, index=False)
     print(f"✅ Transformation complete! Saved to {OUTPUT_FILE}")
 
-
+# ================================
+# Run
+# ================================
 if __name__ == "__main__":
     if not os.path.exists(INPUT_FILE):
         print(f"❌ Input file {INPUT_FILE} not found.")
