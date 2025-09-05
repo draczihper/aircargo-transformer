@@ -13,13 +13,13 @@ UNCLASSIFIED_FILE = "unclassified_words.txt"
 
 # Keywords found in "Nature Goods" (nature has priority)
 CATEGORY_KEYWORDS = {
-    "MEAT": ["meat", "beef", "goat", "mutton", "pork", "chicken", "nyama", "frozen meat", "chilled meat"],
-    "FISH": ["fish", "samaki", "tilapia", "sardine"],
+    "MEAT": ["meat", "beef", "goat", "mutton", "pork", "chicken", "nyama", "frozen meat", "chilled meat", "sheep", "goat carcass"],
+    "FISH": ["fish", "samaki", "tilapia", "sardines", "dagaa"],
     "CRABS/LOBSTER": ["lobster", "crab", "kamba"],
     "FLOWERS": ["flower", "rose", "maua", "carnation", "tulip"],
     "VEGETABLES": ["vegetable", "vegetables", "veg", "mboga"],
     "AVOCADO": ["avocado", "parachichi"],
-    "VALUABLES": ["valuable", "valuables", "jewelry", "cash", "money"],
+    "VALUABLES": ["valuable", "valuables", "jewelry", "cash", "money", "gold"],
     "COURIER": ["courier", "parcel", "express", "ems"],
     "P.O.MAIL": ["mail", "postal", "posta"],
     "PER/COL": ["perishable", "perishables", "chilled", "frozen", "fresh", "col"],
@@ -39,6 +39,17 @@ SHC_MAP = {
     "COU": "COURIER",
     "VAL": "VALUABLES",
     "DG": "DG",
+    "GEN": "G. CARGO",
+    "GCR": "G. CARGO",
+    "NWP": "G. CARGO",
+    "RCM": "DG",
+    "RRY": "DG",
+    "RCL": "DG",
+    "RMD": "DG",
+    "FRO": "PER/COL",
+    "RFL": "DG",
+    "HUM": "G. CARGO",
+    "RNG": "DG"
 }
 
 # Output column layout (sector will be left empty)
@@ -103,7 +114,7 @@ def classify_flight_category(carrier, flight_no):
     """
     Carrier-based rules:
       - PW: default DOMESTIC, but PW717 & PW721 -> PW-FOREIGN
-      - TC: TC100* -> DOMESTIC, TC200*/TC400* -> TC-FOREIGN
+      - TC: TC100* -> DOMESTIC, TC2*/TC4* -> TC-FOREIGN
       - others -> FOREIGN
     Notes:
       - flight_no may include letters or not, so we normalize both alphabetic and numeric forms.
@@ -123,7 +134,7 @@ def classify_flight_category(carrier, flight_no):
     if c == "TC":
         if fn_raw.startswith("TC100") or fn_digits.startswith("100"):
             return "DOMESTIC"
-        if fn_raw.startswith("TC200") or fn_digits.startswith("200") or fn_raw.startswith("TC400") or fn_digits.startswith("400"):
+        if fn_raw.startswith("TC2") or fn_digits.startswith("2") or fn_raw.startswith("TC4") or fn_digits.startswith("4"):
             return "TC-FOREIGN"
         # fallback
         return "FOREIGN"
