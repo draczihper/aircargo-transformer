@@ -1,345 +1,370 @@
-# transform.py
 import pandas as pd
+import numpy as np
 import re
+from collections import defaultdict
 import os
 from datetime import datetime
 
-# -----------------------------
-# Config / mappings
-# -----------------------------
-INPUT_FILE = "Book1.xlsx"
-OUTPUT_FILE = "Book2.xlsx"
-UNCLASSIFIED_FILE = "unclassified_words.txt"
-
-# Keywords found in "Nature Goods" (nature has priority)
-CATEGORY_KEYWORDS = {
-    "MEAT": ["meat", "beef", "goat", "mutton", "pork", "chicken", "nyama", "frozen meat", "chilled meat", "sheep", "goat carcass"],
-    "FISH": ["fish", "samaki", "tilapia", "sardines", "dagaa"],
-    "CRABS/LOBSTER": ["lobster", "crab", "kamba"],
-    "FLOWERS": ["flower", "rose", "maua", "carnation", "tulip"],
-    "VEGETABLES": ["vegetable", "vegetables", "veg", "mboga"],
-    "AVOCADO": ["avocado", "parachichi"],
-    "VALUABLES": ["valuable", "valuables", "jewelry", "cash", "money", "gold"],
-    "COURIER": ["courier", "parcel", "express", "ems"],
-    "P.O.MAIL": ["mail", "postal", "posta"],
-    "PER/COL": ["perishable", "perishables", "chilled", "frozen", "fresh", "col"],
-}
-
-# SHC mapping (codes -> category). If a code maps to multiple categories in practice,
-# choose a default here (nature will override it when present).
-SHC_MAP = {
-    "PEM": "MEAT",
-    "PES": "FISH",       # PES => default FISH (nature can override to CRABS/LOBSTER)
-    "PEF": "FLOWERS",
-    "FLW": "FLOWERS",
-    "AVI": "AVOCADO",
-    "COL": "PER/COL",
-    "PER": "PER/COL",
-    "MAL": "P.O.MAIL",
-    "COU": "COURIER",
-    "VAL": "VALUABLES",
-    "DG": "DG",
-    "GEN": "G. CARGO",
-    "GCR": "G. CARGO",
-    "NWP": "G. CARGO",
-    "RCM": "DG",
-    "RRY": "DG",
-    "RCL": "DG",
-    "RMD": "DG",
-    "FRO": "PER/COL",
-    "RFL": "DG",
-    "HUM": "G. CARGO",
-    "RNG": "DG"
-}
-
-# Output column layout (sector will be left empty)
-OUTPUT_COLUMNS = [
-    "DATE", "AIRLINE", "FLIGHT No", "SECTOR", "F/CATEGORY",
-    "G. CARGO", "VEGETABLES", "AVOCADO", "FISH", "MEAT", "VALUABLES",
-    "FLOWERS", "PER/COL", "DG", "CRABS/LOBSTER", "P.O.MAIL", "COURIER",
-    "G. AWBs", "VAL AWBs", "VEGETABLES AWBs", "AVOCADO AWBs", "FISH AWBs",
-    "MEAT AWBs", "COURIER AWBs", "CRAB/LOBSTER AWBs", "FLOWERS AWBs",
-    "PER/COL AWBs", "DG AWBs", "P.O.MAIL AWBs", "TOTAL AWBs", "TOTAL WEIGHT"
-]
-
-# AWB counters mapping (category -> AWB column)
-AWB_COL_MAP = {
-    "G. CARGO": "G. AWBs",
-    "VALUABLES": "VAL AWBs",
-    "VEGETABLES": "VEGETABLES AWBs",
-    "AVOCADO": "AVOCADO AWBs",
-    "FISH": "FISH AWBs",
-    "MEAT": "MEAT AWBs",
-    "COURIER": "COURIER AWBs",
-    "CRABS/LOBSTER": "CRAB/LOBSTER AWBs",
-    "FLOWERS": "FLOWERS AWBs",
-    "PER/COL": "PER/COL AWBs",
-    "DG": "DG AWBs",
-    "P.O.MAIL": "P.O.MAIL AWBs",
-}
-
-GENERIC_WORDS = {"perishable", "perishables", "chilled", "frozen", "fresh", "col", "per"}
-
-# -----------------------------
-# Utilities
-# -----------------------------
-def normalize_text(x):
-    if pd.isna(x):
-        return ""
-    return str(x).strip()
-
-def normalize_lower(x):
-    return normalize_text(x).lower()
-
-def ensure_log_header():
-    """Ensure each run writes a timestamp header at top of log (append if exists)."""
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    header = f"\n==== Run on {ts} ====\n"
-    # Create file with header if doesn't exist, else append header
-    with open(UNCLASSIFIED_FILE, "a", encoding="utf-8") as f:
-        f.write(header)
-
-def log_unclassified(kind, awb, nature, shcs):
-    """Append a single unclassified/conflict entry (assumes run header already written)."""
-    awb_s = normalize_text(awb)
-    nature_s = normalize_text(nature)
-    shcs_s = normalize_text(shcs)
-    with open(UNCLASSIFIED_FILE, "a", encoding="utf-8") as f:
-        f.write(f"{kind} | AWB:{awb_s} | Nature:{nature_s} | SHC:{shcs_s}\n")
-
-# -----------------------------
-# Flight category logic
-# -----------------------------
-def classify_flight_category(carrier, flight_no):
-    """
-    Carrier-based rules:
-      - PW: default DOMESTIC, but PW717 & PW721 -> PW-FOREIGN
-      - TC: TC100* -> DOMESTIC, TC2*/TC4* -> TC-FOREIGN
-      - others -> FOREIGN
-    Notes:
-      - flight_no may include letters or not, so we normalize both alphabetic and numeric forms.
-    """
-    c = normalize_text(carrier).upper()
-    fn_raw = normalize_text(flight_no).upper()
-
-    # numeric part of flight no (remove non-digits)
-    fn_digits = re.sub(r"\D", "", fn_raw)
-
-    if c == "PW":
-        # check both possible representations
-        if fn_raw.startswith("PW717") or fn_raw.startswith("PW721") or fn_digits.startswith("717") or fn_digits.startswith("721"):
-            return "PW-FOREIGN"
-        return "DOMESTIC"
-
-    if c == "TC":
-        if fn_raw.startswith("TC100") or fn_digits.startswith("100"):
-            return "DOMESTIC"
-        if fn_raw.startswith("TC2") or fn_digits.startswith("2") or fn_raw.startswith("TC4") or fn_digits.startswith("4"):
-            return "TC-FOREIGN"
-        # fallback
-        return "FOREIGN"
-
-    return "FOREIGN"
-
-# -----------------------------
-# Classification logic
-# -----------------------------
-def classify_goods(nature, shc_field, awb):
-    """
-    Priority:
-      1. Nature-of-goods specific keywords -> choose that category (MEAT, FISH, etc).
-      2. If nature is generic (perishable/chilled/...), use SHC to decide.
-      3. If no nature, use SHC (choose from SHC_MAP tokens using a small priority list).
-      4. If AWB contains 'MAL' treat as P.O.MAIL.
-      5. Else log and assign G. CARGO.
-    """
-    nature_l = normalize_lower(nature)
-    shc_raw = normalize_text(shc_field).upper()
-    shc_tokens = [t for t in re.split(r"[\s,/;]+", shc_raw) if t]
-
-    # 1) Nature-of-goods priority
-    for cat, keywords in CATEGORY_KEYWORDS.items():
-        for kw in keywords:
-            if kw in nature_l:
-                # edge: if nature says lobster/crab but SHC is PES (fish) -> keep CRABS/LOBSTER
-                if cat == "FISH" and ("lobster" in nature_l or "crab" in nature_l):
-                    return "CRABS/LOBSTER"
-                return cat
-
-    # 2) SHC tokens -> map to categories (collect all candidates)
-    shc_cands = []
-    for token in shc_tokens:
-        if token in SHC_MAP:
-            shc_cands.append(SHC_MAP[token])
-
-    shc_cands = list(dict.fromkeys(shc_cands))  # unique preserve order
-
-    # AWB rule for mail (if AWB contains MAL)
-    if "MAL" in str(awb).upper():
-        return "P.O.MAIL"
-
-    # 3) If nature contains generic words (chilled/frozen/perishable...), use SHC when available
-    if any(g in nature_l for g in GENERIC_WORDS) and shc_cands:
-        # If SHC contains multiple categories choose sensible priority:
-        priority = ["MEAT", "CRABS/LOBSTER", "FISH", "FLOWERS", "AVOCADO", "VALUABLES", "COURIER", "P.O.MAIL", "PER/COL", "DG"]
-        for p in priority:
-            if p in shc_cands:
-                return p
-        # otherwise pick first
-        return shc_cands[0]
-
-    # 4) If no nature but SHC present -> pick from shc_cands with priority
-    if shc_cands:
-        priority = ["MEAT", "CRABS/LOBSTER", "FISH", "FLOWERS", "AVOCADO", "VALUABLES", "COURIER", "P.O.MAIL", "PER/COL", "DG"]
-        for p in priority:
-            if p in shc_cands:
-                return p
-        return shc_cands[0]
-
-    # 5) Nothing matched => log and default to General Cargo
-    log_unclassified("UNCLASSIFIED", awb, nature, shc_field)
-    return "G. CARGO"
-
-# -----------------------------
-# Input reader (robust header handling)
-# -----------------------------
-def read_input(input_file):
-    """
-    Attempt to read the Excel with sensible header row.
-    Prefer header=1 (your usual export), fallback to header=0.
-    Normalize/rename key columns to standardized names.
-    """
-    df = None
-    for hdr in (1, 0, 2):
+class FlightDataTransformer:
+    def __init__(self):
+        # Define classification keywords for each category
+        self.category_keywords = {
+            'MEAT': [
+                'meat', 'nyama', 'goat meat', 'beef', 'pork', 'chicken', 'mutton',
+                'lamb', 'fresh chilled meat', 'frozen meat', 'pem', 'poultry'
+            ],
+            'FISH': [
+                'fish', 'samaki', 'salmon', 'tuna', 'tilapia', 'fresh fish', 
+                'frozen fish', 'seafood', 'sardines'
+            ],
+            'AVOCADO': [
+                'avocado', 'parachichi', 'avocados', 'fresh avocado'
+            ],
+            'VEGETABLES': [
+                'vegetables', 'mboga', 'tomatoes', 'onions', 'carrots', 'cabbage',
+                'fresh vegetables', 'green beans', 'peas', 'potatoes', 'leafy vegetables'
+            ],
+            'FLOWERS': [
+                'flowers', 'maua', 'roses', 'chrysanthemums', 'carnations', 
+                'fresh flowers', 'cut flowers', 'floral'
+            ],
+            'COURIER': [
+                'courier', 'express', 'ems', 'dhl', 'fedex', 'ups', 'tnt',
+                'documents', 'express mail'
+            ],
+            'P.O.MAIL': [
+                'mail', 'posta', 'post', 'postal', 'letters', 'registered mail',
+                'parcel post', 'airmail'
+            ],
+            'VALUABLES': [
+                'valuables', 'gold', 'jewelry', 'diamonds', 'precious', 'val',
+                'valuable cargo', 'gems', 'bullion'
+            ],
+            'PER/COL': [
+                'perishable', 'per', 'col', 'perishables', 'cold storage',
+                'temperature controlled', 'chilled'
+            ],
+            'DG': [
+                'dangerous goods', 'dg', 'hazardous', 'dangerous', 'toxic',
+                'flammable', 'corrosive', 'radioactive'
+            ],
+            'CRABS/LOBSTER': [
+                'crab', 'lobster', 'crabs', 'lobsters', 'shellfish', 'kaa',
+                'fresh crabs', 'live crabs', 'live lobster'
+            ]
+        }
+        
+        # Track unclassified words
+        self.unclassified_words = set()
+        
+    def clean_text(self, text):
+        """Clean and normalize text for classification"""
+        if pd.isna(text):
+            return ""
+        return str(text).lower().strip()
+    
+    def classify_awb(self, awb, nature_goods, shcs):
+        """Classify AWB into categories based on keywords and AWB number"""
+        # Check for P.O.MAIL first (AWB prefix)
+        if pd.notna(awb) and str(awb).upper().startswith('MAL'):
+            return 'P.O.MAIL'
+        
+        # Combine all text fields for classification
+        combined_text = f"{self.clean_text(nature_goods)} {self.clean_text(shcs)}"
+        
+        # If no text content, check AWB number patterns
+        if not combined_text.strip():
+            awb_str = str(awb) if pd.notna(awb) else ""
+            # Add more AWB prefix patterns as needed
+            if any(pattern in awb_str.upper() for pattern in ['VAL', 'DG', 'PER']):
+                if 'VAL' in awb_str.upper():
+                    return 'VALUABLES'
+                elif 'DG' in awb_str.upper():
+                    return 'DG'
+                elif 'PER' in awb_str.upper():
+                    return 'PER/COL'
+            return 'G. CARGO'
+        
+        # Check each category for keyword matches
+        for category, keywords in self.category_keywords.items():
+            for keyword in keywords:
+                if keyword in combined_text:
+                    return category
+        
+        # Log unclassified words for learning
+        words = re.findall(r'\b\w+\b', combined_text)
+        for word in words:
+            if len(word) > 2:  # Only log meaningful words
+                self.unclassified_words.add(word)
+        
+        return 'G. CARGO'  # Default category
+    
+    def transform_data(self, input_file, output_file):
+        """Main transformation function"""
         try:
-            tmp = pd.read_excel(input_file, header=hdr)
-        except Exception:
-            continue
-        cols_lower = [str(c).strip().lower() for c in tmp.columns]
-        # We expect at least 'flight' and 'awb' columns to be present
-        if any("flight" in c and "date" in c for c in cols_lower) or any("flight no" in c for c in cols_lower):
-            df = tmp
-            break
-    if df is None:
-        # final fallback - try default read
-        df = pd.read_excel(input_file, header=0)
-
-    # build a mapping from current column names to standardized keys
-    col_map = {}
-    for c in df.columns:
-        lc = str(c).strip().lower()
-        if "flight" in lc and "date" in lc:
-            col_map[c] = "flight_date"
-        elif lc == "carrier" or "carrier" in lc or "airline" in lc:
-            col_map[c] = "carrier"
-        elif "flight" in lc and ("no" in lc or "number" in lc):
-            col_map[c] = "flight_no"
-        elif "origin" in lc:
-            col_map[c] = "origin"
-        elif "dest" in lc or "destination" in lc:
-            col_map[c] = "dest"
-        elif "awb" in lc:
-            col_map[c] = "awb"
-        elif "rcv" in lc and "weight" in lc or lc == "weight" or "rcv weight" in lc:
-            col_map[c] = "rcv_weight"
-        elif "nature" in lc and "good" in lc:
-            col_map[c] = "nature_goods"
-        elif "shc" in lc:
-            col_map[c] = "shcs"
+            # Read the input Excel file
+            print(f"Reading input file: {input_file}")
+            df = pd.read_excel(input_file)
+            
+            # Standardize column names (handle variations in naming)
+            column_mapping = {
+                'Flight date': 'Flight_date',
+                'Carrier': 'Carrier',
+                'Flight No.': 'Flight_No',
+                'origin': 'Origin',
+                'dest': 'Dest',
+                'AWB': 'AWB',
+                'weight': 'Weight',
+                'Rcv weight': 'Rcv_weight',
+                'Nature Goods': 'Nature_Goods',
+                'SHCs': 'SHCs'
+            }
+            
+            # Rename columns if they exist
+            for old_name, new_name in column_mapping.items():
+                if old_name in df.columns:
+                    df = df.rename(columns={old_name: new_name})
+            
+            print(f"Input data shape: {df.shape}")
+            print(f"Columns: {list(df.columns)}")
+            
+            # Create SECTOR column
+            df['SECTOR'] = df['Origin'].astype(str) + '-' + df['Dest'].astype(str)
+            
+            # Convert Flight_date to date format
+            df['DATE'] = pd.to_datetime(df['Flight_date']).dt.date
+            
+            # Use received weight if available, otherwise use weight
+            df['Final_Weight'] = df.get('Rcv_weight', df['Weight'])
+            df['Final_Weight'] = pd.to_numeric(df['Final_Weight'], errors='coerce').fillna(0)
+            
+            # Classify each AWB
+            print("Classifying AWBs...")
+            df['Category'] = df.apply(
+                lambda row: self.classify_awb(
+                    row.get('AWB', ''),
+                    row.get('Nature_Goods', ''),
+                    row.get('SHCs', '')
+                ),
+                axis=1
+            )
+            
+            # Group by DATE, Carrier, Flight_No, SECTOR
+            print("Grouping and aggregating data...")
+            grouped = df.groupby(['DATE', 'Carrier', 'Flight_No', 'SECTOR'])
+            
+            # Initialize result list
+            results = []
+            
+            for (date, airline, flight_no, sector), group in grouped:
+                row_data = {
+                    'DATE': date,
+                    'AIRLINE': airline,
+                    'FLIGHT No': flight_no,
+                    'SECTOR': sector,
+                    'F/CATEGORY': '',  # Can be filled based on business logic
+                }
+                
+                # Initialize all category columns
+                categories = [
+                    'G. CARGO', 'VEGETABLES', 'AVOCADO', 'FISH', 'MEAT', 
+                    'VALUABLES', 'FLOWERS', 'PER/COL', 'DG', 'CRABS/LOBSTER', 
+                    'P.O.MAIL', 'COURIER'
+                ]
+                
+                # Initialize weight columns
+                for cat in categories:
+                    row_data[cat] = 0
+                
+                # Initialize AWB count columns
+                awb_categories = [
+                    'G. AWBs', 'VAL AWBs', 'VEGETABLES AWBs', 'AVOCADO AWBs',
+                    'FISH AWBs', 'MEAT AWBs', 'COURIER AWBs', 'CRAB/LOBSTER AWBs',
+                    'FLOWERS AWBs', 'PER/COL AWBs', 'DG AWBs', 'MAIL AWBs'
+                ]
+                
+                for awb_cat in awb_categories:
+                    row_data[awb_cat] = 0
+                
+                # Aggregate weights and counts by category
+                category_stats = group.groupby('Category').agg({
+                    'Final_Weight': 'sum',
+                    'AWB': 'count'
+                }).reset_index()
+                
+                total_weight = 0
+                total_awbs = 0
+                
+                for _, cat_row in category_stats.iterrows():
+                    category = cat_row['Category']
+                    weight = cat_row['Final_Weight']
+                    count = cat_row['AWB']
+                    
+                    # Map categories to columns
+                    if category in row_data:
+                        row_data[category] = weight
+                    
+                    # Map to AWB count columns
+                    awb_col_mapping = {
+                        'G. CARGO': 'G. AWBs',
+                        'VALUABLES': 'VAL AWBs',
+                        'VEGETABLES': 'VEGETABLES AWBs',
+                        'AVOCADO': 'AVOCADO AWBs',
+                        'FISH': 'FISH AWBs',
+                        'MEAT': 'MEAT AWBs',
+                        'COURIER': 'COURIER AWBs',
+                        'CRABS/LOBSTER': 'CRAB/LOBSTER AWBs',
+                        'FLOWERS': 'FLOWERS AWBs',
+                        'PER/COL': 'PER/COL AWBs',
+                        'DG': 'DG AWBs',
+                        'P.O.MAIL': 'MAIL AWBs'
+                    }
+                    
+                    if category in awb_col_mapping:
+                        row_data[awb_col_mapping[category]] = count
+                    
+                    total_weight += weight
+                    total_awbs += count
+                
+                row_data['TOTAL AWBs'] = total_awbs
+                row_data['TOTAL WEIGHT'] = total_weight
+                
+                results.append(row_data)
+            
+            # Create output DataFrame
+            result_df = pd.DataFrame(results)
+            
+            # Ensure all required columns exist in the correct order
+            required_columns = [
+                'DATE', 'AIRLINE', 'FLIGHT No', 'SECTOR', 'F/CATEGORY',
+                'G. CARGO', 'VEGETABLES', 'AVOCADO', 'FISH', 'MEAT',
+                'VALUABLES', 'FLOWERS', 'PER/COL', 'DG', 'CRABS/LOBSTER',
+                'P.O.MAIL', 'COURIER', 'G. AWBs', 'VAL AWBs', 'VEGETABLES AWBs',
+                'AVOCADO AWBs', 'FISH AWBs', 'MEAT AWBs', 'COURIER AWBs',
+                'CRAB/LOBSTER AWBs', 'FLOWERS AWBs', 'PER/COL AWBs',
+                'DG AWBs', 'MAIL AWBs', 'TOTAL AWBs', 'TOTAL WEIGHT'
+            ]
+            
+            # Reorder columns and fill missing ones
+            for col in required_columns:
+                if col not in result_df.columns:
+                    result_df[col] = 0
+            
+            result_df = result_df[required_columns]
+            
+            # Sort by date and airline
+            result_df = result_df.sort_values(['DATE', 'AIRLINE', 'FLIGHT No'])
+            
+            # Write to Excel
+            print(f"Writing output file: {output_file}")
+            with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+                result_df.to_excel(writer, sheet_name='Formatted Report', index=False)
+            
+            # Log unclassified words
+            self.log_unclassified_words()
+            
+            print(f"Transformation completed successfully!")
+            print(f"Output records: {len(result_df)}")
+            print(f"Unclassified words logged: {len(self.unclassified_words)}")
+            
+            return result_df
+            
+        except Exception as e:
+            print(f"Error during transformation: {str(e)}")
+            raise
+    
+    def log_unclassified_words(self):
+        """Log unclassified words to a text file for review"""
+        if not self.unclassified_words:
+            return
+        
+        log_file = 'unclassified_words.txt'
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Read existing words to avoid duplicates
+        existing_words = set()
+        if os.path.exists(log_file):
+            with open(log_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if not line.startswith('#') and line.strip():
+                        existing_words.add(line.strip().lower())
+        
+        # Filter out words that already exist
+        new_words = self.unclassified_words - existing_words
+        
+        if new_words:
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"\n# Unclassified words logged on {timestamp}\n")
+                for word in sorted(new_words):
+                    f.write(f"{word}\n")
+            
+            print(f"Logged {len(new_words)} new unclassified words to {log_file}")
         else:
-            col_map[c] = c  # keep original if unknown
+            print("No new unclassified words to log")
+    
+    def update_keywords(self, keyword_updates):
+        """Update keyword mappings based on user review"""
+        for category, new_keywords in keyword_updates.items():
+            if category in self.category_keywords:
+                self.category_keywords[category].extend(new_keywords)
+                print(f"Added {len(new_keywords)} keywords to {category}")
+            else:
+                print(f"Warning: Category '{category}' not found")
 
-    df = df.rename(columns=col_map)
-
-    # Ensure required cols exist (create if missing)
-    for required in ("flight_date", "carrier", "flight_no", "awb", "rcv_weight", "nature_goods", "shcs"):
-        if required not in df.columns:
-            df[required] = ""
-
-    # force rcv_weight numeric
-    df["rcv_weight"] = pd.to_numeric(df["rcv_weight"], errors="coerce").fillna(0.0)
-
-    # Make sure flight_no and carrier are strings
-    df["flight_no"] = df["flight_no"].astype(str)
-    df["carrier"] = df["carrier"].astype(str)
-
-    return df
-
-# -----------------------------
-# Main transform
-# -----------------------------
-def transform(input_file=INPUT_FILE, output_file=OUTPUT_FILE):
-    # Read input
-    if not os.path.exists(input_file):
-        print(f"Input file '{input_file}' not found.")
-        return
-
-    df = read_input(input_file)
-
-    # Prepare logging header
-    ensure_log_header()
-
-    # Compute flight category (F/CATEGORY) per row
-    df["f_category"] = df.apply(lambda r: classify_flight_category(r.get("carrier", ""), r.get("flight_no", "")), axis=1)
-
-    # Compute "category" per AWB row
-    df["category"] = df.apply(lambda r: classify_goods(r.get("nature_goods", ""), r.get("shcs", ""), r.get("awb", "")), axis=1)
-
-    # We IGNORE origin/dest when grouping — the user requested sector be empty.
-    # Group by: flight_date, carrier, flight_no, f_category
-    group_cols = ["flight_date", "carrier", "flight_no", "f_category"]
-
-    aggregated = []
-    for keys, grp in df.groupby(group_cols, dropna=False):
-        flight_date, carrier, flight_no, f_category = keys
-        # Prepare row skeleton
-        row = {col: 0 for col in OUTPUT_COLUMNS}
-        row["DATE"] = flight_date
-        row["AIRLINE"] = carrier
-        row["FLIGHT No"] = flight_no
-        row["SECTOR"] = ""          # intentionally left empty
-        row["F/CATEGORY"] = f_category
-
-        # Sum weights & count unique AWBs per category
-        total_awbs = 0
-        total_weight = 0.0
-
-        # track seen AWBs to count unique awbs per category reliably
-        # (we'll count per-category using nunique below)
-        for cat in [c for c in CATEGORY_KEYWORDS.keys()] + list({"PER/COL","DG"}):
-            pass  # we won't use this loop; we'll use fixed category list next
-
-        # Use fixed categories order for sums (matching OUTPUT_COLUMNS)
-        category_list = ["G. CARGO", "VEGETABLES", "AVOCADO", "FISH", "MEAT", "VALUABLES",
-                         "FLOWERS", "PER/COL", "DG", "CRABS/LOBSTER", "P.O.MAIL", "COURIER"]
-
-        for cat in category_list:
-            sub = grp[grp["category"] == cat]
-            wsum = float(sub["rcv_weight"].sum()) if not sub.empty else 0.0
-            awb_count = int(sub["awb"].nunique()) if not sub.empty else 0
-            # Put weight in category column
-            row[cat] = wsum
-            # Put AWB count in AWB column (if mapping exists)
-            awb_col = AWB_COL_MAP.get(cat)
-            if awb_col:
-                row[awb_col] = awb_count
-            total_weight += wsum
-            total_awbs += awb_count
-
-        row["TOTAL WEIGHT"] = total_weight
-        row["TOTAL AWBs"] = total_awbs
-
-        aggregated.append(row)
-
-    out_df = pd.DataFrame(aggregated, columns=OUTPUT_COLUMNS)
-
-    # Ensure numeric columns are numeric (replace NaN with 0)
-    num_cols = [c for c in OUTPUT_COLUMNS if c not in ("DATE","AIRLINE","FLIGHT No","SECTOR","F/CATEGORY")]
-    out_df[num_cols] = out_df[num_cols].fillna(0)
-
-    out_df.to_excel(output_file, index=False)
-    print(f"✅ Transformation complete — saved to '{output_file}' (SECTOR intentionally empty).")
-    print(f"Unclassified/conflict log: '{UNCLASSIFIED_FILE}' (timestamped).")
+def main():
+    """Main execution function"""
+    # Initialize transformer
+    transformer = FlightDataTransformer()
+    
+    # Example usage
+    input_file = "Book1.xlsx"  # Replace with your input file path
+    output_file = "Book2.xlsx"  # Replace with your desired output file path
+    
+    try:
+        # Transform the data
+        result_df = transformer.transform_data(input_file, output_file)
+        
+        # Display summary
+        print("\n" + "="*50)
+        print("TRANSFORMATION SUMMARY")
+        print("="*50)
+        print(f"Total flights processed: {len(result_df)}")
+        print(f"Date range: {result_df['DATE'].min()} to {result_df['DATE'].max()}")
+        print(f"Airlines: {', '.join(result_df['AIRLINE'].unique())}")
+        print(f"Total AWBs: {result_df['TOTAL AWBs'].sum()}")
+        print(f"Total Weight: {result_df['TOTAL WEIGHT'].sum():.2f}")
+        
+        # Show category breakdown
+        print("\nCategory breakdown:")
+        categories = ['G. CARGO', 'VEGETABLES', 'AVOCADO', 'FISH', 'MEAT',
+                     'VALUABLES', 'FLOWERS', 'PER/COL', 'DG', 'CRABS/LOBSTER',
+                     'P.O.MAIL', 'COURIER']
+        
+        for category in categories:
+            total_weight = result_df[category].sum()
+            if total_weight > 0:
+                print(f"  {category}: {total_weight:.2f} kg")
+        
+    except FileNotFoundError:
+        print(f"Error: Input file '{input_file}' not found.")
+        print("Please ensure the file exists and the path is correct.")
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
 
 if __name__ == "__main__":
-    transform()
+    main()
+
+# Example of how to update keywords after reviewing unclassified_words.txt
+"""
+# After reviewing unclassified_words.txt, you can update keywords like this:
+transformer = FlightDataTransformer()
+
+keyword_updates = {
+    'VEGETABLES': ['mboga_mpya', 'fresh_produce'],
+    'FISH': ['samaki_fresh', 'tuna_fresh'],
+    'MEAT': ['kuku', 'chicken_fresh']
+}
+
+transformer.update_keywords(keyword_updates)
+# Then run the transformation again
+"""
