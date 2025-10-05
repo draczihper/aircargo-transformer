@@ -1,75 +1,114 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime
-import warnings
-warnings.filterwarnings('ignore')
 
-def classify_cargo(row, unclassified_log):
-    """
-    Classify cargo based on Nature Goods and SHCs with comprehensive rules.
-    Returns the category and weight for that category.
-    """
-    nature_goods = str(row['Nature Goods']).lower() if pd.notna(row['Nature Goods']) else ''
-    shcs = str(row['SHCs']).upper() if pd.notna(row['SHCs']) else ''
-    weight = float(row['weight']) if pd.notna(row['weight']) else 0
-    awb = str(row['AWB']) if pd.notna(row['AWB']) else ''
-    
-    # Check AWB prefix for P.O.MAIL
-    if awb.startswith('MAL'):
-        return 'P.O.MAIL', weight
-    
-    # Priority 1: Specific items in Nature Goods
-    if 'meat' in nature_goods or 'PEM' in shcs:
-        return 'MEAT', weight
-    
-    if 'fish' in nature_goods or 'PES' in shcs:
-        # Special case for crabs/lobster
-        if any(term in nature_goods for term in ['lobster', 'crab', 'crabs']):
-            return 'CRABS/LOBSTER', weight
-        return 'FISH', weight
-    
-    if any(term in nature_goods for term in ['lobster', 'crab', 'crabs']) or 'PES' in shcs or 'PEL' in shcs:
-        return 'CRABS/LOBSTER', weight
-    
-    if 'flower' in nature_goods or 'PEF' in shcs:
-        return 'FLOWERS', weight
-    
-    if 'avocado' in nature_goods:
-        return 'AVOCADO', weight
-    
-    if 'vegetable' in nature_goods or 'vegetables' in nature_goods:
-        return 'VEGETABLES', weight
-    
-    if 'courier' in nature_goods or 'COU' in shcs:
-        return 'COURIER', weight
-    
-    if 'valuable' in nature_goods or 'VAL' in shcs:
-        return 'VALUABLES', weight
+# -----------------------------
+# Config / mappings
+# -----------------------------
+INPUT_FILE = "Book1.xlsx"
+OUTPUT_FILE = "Book2.xlsx" 
+UNCLASSIFIED_FILE = "unclassified_words.txt"
 
-    if any(term in shcs for term in['RFL', 'RMD', 'RRY', 'DGR','RNG', 'RCL', 'RCM' ]) or 'dangerous' in nature_goods:
-        return 'DG', weight
-    
-    if 'GEN' in shcs or 'GCR' in shcs or 'HUM' in shcs or 'NWP' in shcs:
-        return 'G. CARGO', weight
-    
-    
-    # Priority 2: Generic perishables
-    perishable_terms = ['perishable', 'fresh', 'chilled', 'frozen', 'cool', 'cold']
-    if any(term in nature_goods for term in perishable_terms) or 'COL' in shcs or 'PER' in shcs or 'FRO' in shcs:
-        return 'PER/COL', weight
-    
-    # If we can't classify with confidence, log it
-    if nature_goods and nature_goods not in ['general cargo', 'cargo', 'general', '']:
-        unclassified_log.append({
-            'AWB': awb,
-            'Nature Goods': row['Nature Goods'],
-            'SHCs': row['SHCs'],
-            'Timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        })
-    
-    # Default to general cargo
-    return 'G. CARGO', weight
+# Keywords found in "Nature Goods" (nature has priority)
+CATEGORY_KEYWORDS = {
+    "MEAT": ["meat", "beef", "goat", "mutton", "pork", "chicken", "nyama", "frozen meat", "chilled meat", "sheep", "goat carcass"],
+    "FISH": ["fish", "samaki", "tilapia", "sardines", "dagaa"],
+    "CRABS/LOBSTER": ["lobster", "crab", "kamba"],
+    "FLOWERS": ["flower", "rose", "maua", "carnation", "tulip"],
+    "VEGETABLES": ["vegetable", "vegetables", "veg", "mboga"],
+    "AVOCADO": ["avocado", "parachichi"],
+    "VALUABLES": ["valuable", "valuables", "jewelry", "cash", "money", "gold"],
+    "COURIER": ["courier", "parcel", "express", "ems"],
+    "P.O.MAIL": ["mail", "postal", "posta"],
+    "PER/COL": ["perishable", "perishables", "chilled", "frozen", "fresh", "col"],
+}
 
+# SHC mapping (codes -> category). If a code maps to multiple categories in practice,
+# choose a default here (nature will override it when present).
+SHC_MAP = {
+    "PEM": "MEAT",
+    "PES": "FISH",       # PES => default FISH (nature can override to CRABS/LOBSTER)
+    "PEF": "FLOWERS",
+    "FLW": "FLOWERS",
+    "AVI": "AVOCADO",
+    "COL": "PER/COL",
+    "PER": "PER/COL",
+    "MAL": "P.O.MAIL",
+    "COU": "COURIER",
+    "VAL": "VALUABLES",
+    "DG": "DG",
+    "GEN": "G. CARGO",
+    "GCR": "G. CARGO",
+    "NWP": "G. CARGO",
+    "RCM": "DG",
+    "RRY": "DG",
+    "RCL": "DG",
+    "RMD": "DG",
+    "FRO": "PER/COL",
+    "RFL": "DG",
+    "HUM": "G. CARGO",
+    "RNG": "DG", 
+    "RIS": "DG",
+}
+
+# Output column layout (sector will be left empty)
+OUTPUT_COLUMNS = [
+    "DATE", "AIRLINE", "FLIGHT No", "SECTOR", "F/CATEGORY",
+    "G. CARGO", "VEGETABLES", "AVOCADO", "FISH", "MEAT", "VALUABLES",
+    "FLOWERS", "PER/COL", "DG", "CRABS/LOBSTER", "P.O.MAIL", "COURIER",
+    "G. AWBs", "VAL AWBs", "VEGETABLES AWBs", "AVOCADO AWBs", "FISH AWBs",
+    "MEAT AWBs", "COURIER AWBs", "CRAB/LOBSTER AWBs", "FLOWERS AWBs",
+    "PER/COL AWBs", "DG AWBs", "P.O.MAIL AWBs", "TOTAL AWBs", "TOTAL WEIGHT"
+]
+
+# AWB counters mapping (category -> AWB column)
+AWB_COL_MAP = {
+    "G. CARGO": "G. AWBs",
+    "VALUABLES": "VAL AWBs",
+    "VEGETABLES": "VEGETABLES AWBs",
+    "AVOCADO": "AVOCADO AWBs",
+    "FISH": "FISH AWBs",
+    "MEAT": "MEAT AWBs",
+    "COURIER": "COURIER AWBs",
+    "CRABS/LOBSTER": "CRAB/LOBSTER AWBs",
+    "FLOWERS": "FLOWERS AWBs",
+    "PER/COL": "PER/COL AWBs",
+    "DG": "DG AWBs",
+    "P.O.MAIL": "P.O.MAIL AWBs",
+}
+
+GENERIC_WORDS = {"perishable", "perishables", "chilled", "frozen", "fresh", "col", "per"}
+
+# -----------------------------
+# Utilities
+# -----------------------------
+def normalize_text(x):
+    if pd.isna(x):
+        return ""
+    return str(x).strip()
+
+def normalize_lower(x):
+    return normalize_text(x).lower()
+
+def ensure_log_header():
+    """Ensure each run writes a timestamp header at top of log (append if exists)."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    header = f"\n==== Run on {ts} ====\n"
+    # Create file with header if doesn't exist, else append header
+    with open(UNCLASSIFIED_FILE, "a", encoding="utf-8") as f:
+        f.write(header)
+
+def log_unclassified(kind, awb, nature, shcs):
+    """Append a single unclassified/conflict entry (assumes run header already written)."""
+    awb_s = normalize_text(awb)
+    nature_s = normalize_text(nature)
+    shcs_s = normalize_text(shcs)
+    with open(UNCLASSIFIED_FILE, "a", encoding="utf-8") as f:
+        f.write(f"{kind} | AWB:{awb_s} | Nature:{nature_s} | SHC:{shcs_s}\n")
+
+# -----------------------------
+# Flight category logic
+# -----------------------------
 def classify_flight_category(carrier, flight_no):
     """
     Classify flight category based on carrier and flight number.
