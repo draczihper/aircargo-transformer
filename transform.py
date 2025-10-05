@@ -133,7 +133,7 @@ def classify_flight_category(carrier, flight_no):
         return "DOMESTIC"
 
     if c == "TC":
-        if fn_raw.startswith("TC100") or fn_digits.startswith("100"):
+        if fn_raw.startswith("TC1") or fn_digits.startswith("1"):
             return "DOMESTIC"
         if fn_raw.startswith("TC2") or fn_digits.startswith("2") or fn_raw.startswith("TC4") or fn_digits.startswith("4"):
             return "TC-FOREIGN"
