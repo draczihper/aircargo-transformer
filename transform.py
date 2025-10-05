@@ -8,7 +8,7 @@ from datetime import datetime
 # Config / mappings
 # -----------------------------
 INPUT_FILE = "Book1.xlsx"
-OUTPUT_FILE = "Book2.xlsx"
+OUTPUT_FILE = "Book2.xlsx" 
 UNCLASSIFIED_FILE = "unclassified_words.txt"
 
 # Keywords found in "Nature Goods" (nature has priority)
@@ -49,7 +49,8 @@ SHC_MAP = {
     "FRO": "PER/COL",
     "RFL": "DG",
     "HUM": "G. CARGO",
-    "RNG": "DG"
+    "RNG": "DG", 
+    "RIS": "DG",
 }
 
 # Output column layout (sector will be left empty)
