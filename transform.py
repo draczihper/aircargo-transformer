@@ -28,7 +28,7 @@ def classify_cargo(row, unclassified_log):
             return 'CRABS/LOBSTER', weight
         return 'FISH', weight
     
-    if any(term in nature_goods for term in ['lobster', 'crab', 'crabs']) and 'PES' in shcs:
+    if any(term in nature_goods for term in ['lobster', 'crab', 'crabs']) or 'PES' in shcs:
         return 'CRABS/LOBSTER', weight
     
     if 'flower' in nature_goods or 'PEF' in shcs:
@@ -40,14 +40,17 @@ def classify_cargo(row, unclassified_log):
     if 'vegetable' in nature_goods or 'vegetables' in nature_goods:
         return 'VEGETABLES', weight
     
-    if 'courier' in nature_goods:
+    if 'courier' in nature_goods or 'COU' in shcs:
         return 'COURIER', weight
     
     if 'valuable' in nature_goods or 'VAL' in shcs:
         return 'VALUABLES', weight
     
-    if 'DGR' in shcs or 'RRY' in shcs or 'dangerous' in nature_goods:
+    if any(term in shcs for term in ['DGR','RRY', 'RMD', 'RPB', 'RFL', 'RCG', 'RNG']) or 'dangerous' in nature_goods:
         return 'DG', weight
+    
+    if any(term in shcs for term in ['GEN', 'GCR','HUM', 'NWP', 'DXP', 'AVX', 'PIL']):
+        return 'G. CARGO', weight
     
     # Priority 2: Generic perishables
     perishable_terms = ['perishable', 'fresh', 'chilled', 'frozen', 'cool', 'cold']
