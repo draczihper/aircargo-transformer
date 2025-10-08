@@ -11,7 +11,7 @@ def classify_cargo(row, unclassified_log):
     """
     nature_goods = str(row['Nature Goods']).lower() if pd.notna(row['Nature Goods']) else ''
     shcs = str(row['SHCs']).upper() if pd.notna(row['SHCs']) else ''
-    weight = float(row['weight']) if pd.notna(row['weight']) else 0
+    weight = float(row['Weight']) if pd.notna(row['Weight']) else 0
     awb = str(row['AWB']) if pd.notna(row['AWB']) else ''
     
     # Check AWB prefix for P.O.MAIL
@@ -28,7 +28,7 @@ def classify_cargo(row, unclassified_log):
             return 'CRABS/LOBSTER', weight
         return 'FISH', weight
     
-    if any(term in nature_goods for term in ['lobster', 'crab', 'crabs']) or 'PES' in shcs or 'PEL' in shcs:
+    if any(term in nature_goods for term in ['lobster', 'crab', 'crabs']) and 'PES' in shcs:
         return 'CRABS/LOBSTER', weight
     
     if 'flower' in nature_goods or 'PEF' in shcs:
@@ -40,22 +40,18 @@ def classify_cargo(row, unclassified_log):
     if 'vegetable' in nature_goods or 'vegetables' in nature_goods:
         return 'VEGETABLES', weight
     
-    if 'courier' in nature_goods or 'COU' in shcs:
+    if 'courier' in nature_goods:
         return 'COURIER', weight
     
     if 'valuable' in nature_goods or 'VAL' in shcs:
         return 'VALUABLES', weight
-
-    if any(term in shcs for term in['RFL', 'RMD', 'RRY', 'DGR','RNG', 'RCL', 'RCM' ]) or 'dangerous' in nature_goods:
+    
+    if 'DGR' in shcs or 'RRY' in shcs or 'dangerous' in nature_goods:
         return 'DG', weight
-    
-    if 'GEN' in shcs or 'GCR' in shcs or 'HUM' in shcs or 'NWP' in shcs:
-        return 'G. CARGO', weight
-    
     
     # Priority 2: Generic perishables
     perishable_terms = ['perishable', 'fresh', 'chilled', 'frozen', 'cool', 'cold']
-    if any(term in nature_goods for term in perishable_terms) or 'COL' in shcs or 'PER' in shcs or 'FRO' in shcs:
+    if any(term in nature_goods for term in perishable_terms) or 'COL' in shcs or 'PER' in shcs:
         return 'PER/COL', weight
     
     # If we can't classify with confidence, log it
@@ -88,7 +84,7 @@ def classify_flight_category(carrier, flight_no):
     
     # PW flights
     elif carrier == 'PW':
-        if flight_no in ['PW717', 'PW721']:
+        if flight_no in ['717', '721']:
             return 'PW-FOREIGN'
         else:
             return 'DOMESTIC'
@@ -103,13 +99,47 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
     """
     print(f"Reading {input_file}...")
     
-    # Read Book1 with header at row 1 (index 1)
+    # Read Book1 with header at row 2 (index 1)
     df_book1 = pd.read_excel(input_file, header=0)
     
-    # Clean column names
+    # Clean column names - remove extra spaces
     df_book1.columns = df_book1.columns.str.strip()
     
     print(f"Total rows in Book1: {len(df_book1)}")
+    print(f"\nColumns found in Book1:")
+    for i, col in enumerate(df_book1.columns):
+        print(f"  {i}: '{col}'")
+    print()
+    
+    # Try to identify the correct column names (case-insensitive matching)
+    column_mapping = {}
+    for col in df_book1.columns:
+        col_lower = col.lower()
+        if 'flight' in col_lower and 'date' in col_lower:
+            column_mapping['Flight date'] = col
+        elif col_lower == 'carrier' or col_lower == 'airlines' or col_lower == 'airline':
+            column_mapping['Carrier'] = col
+        elif 'flight' in col_lower and ('no' in col_lower or 'number' in col_lower):
+            column_mapping['Flight No.'] = col
+        elif col_lower == 'awb' or 'awb' in col_lower:
+            column_mapping['AWB'] = col
+        elif 'nature' in col_lower and 'goods' in col_lower:
+            column_mapping['Nature Goods'] = col
+        elif 'rcv' in col_lower or 'weight' in col_lower:
+            column_mapping['Weight'] = col
+        elif 'shc' in col_lower:
+            column_mapping['SHCs'] = col
+    
+    # Rename columns to expected names
+    df_book1 = df_book1.rename(columns={v: k for k, v in column_mapping.items()})
+    
+    # Check if we have all required columns
+    required_columns = ['Flight date', 'Carrier', 'Flight No.', 'AWB', 'Weight', 'Nature Goods', 'SHCs']
+    missing_columns = [col for col in required_columns if col not in df_book1.columns]
+    
+    if missing_columns:
+        print(f"Warning: Missing columns: {missing_columns}")
+        print("Attempting to proceed with available columns...")
     
     # Initialize list for unclassified items
     unclassified_log = []
@@ -230,13 +260,6 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
     print(f"Total weight processed: {df_book2['TOTAL WEIGHT'].sum():,.2f} kg")
     
     # Category breakdown
-    print(f"\nCategory Breakdown (Weight):")
-    for col in category_columns:
-        count = df_book2[col].sum()
-        if count > 0:
-            print(f"  {col}: {count} kg")
-    
-
     print(f"\nCategory Breakdown (AWBs):")
     for col in awb_columns:
         count = df_book2[col].sum()
@@ -244,7 +267,6 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
             print(f"  {col}: {count}")
     
     return df_book2
-    
 
 if __name__ == "__main__":
     # Run the transformation
