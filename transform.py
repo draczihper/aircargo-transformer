@@ -46,7 +46,7 @@ def classify_cargo(row, unclassified_log):
     if 'valuable' in nature_goods or 'VAL' in shcs:
         return 'VALUABLES', weight
     
-    if any(term in shcs for term in ['DGR','RRY', 'RMD', 'RPB', 'RFL', 'RCG', 'RNG']) or 'dangerous' in nature_goods:
+    if any(term in shcs for term in ['DGR','RRY', 'RMD', 'RPB', 'RFL', 'RCG', 'RNG', 'RIS']) or 'dangerous' in nature_goods:
         return 'DG', weight
     
     if any(term in shcs for term in ['GEN', 'GCR','HUM', 'NWP', 'DXP', 'AVX', 'PIL']):
@@ -54,7 +54,7 @@ def classify_cargo(row, unclassified_log):
     
     # Priority 2: Generic perishables
     perishable_terms = ['perishable', 'fresh', 'chilled', 'frozen', 'cool', 'cold']
-    if any(term in nature_goods for term in perishable_terms) or 'COL' in shcs or 'PER' in shcs:
+    if any(term in nature_goods for term in perishable_terms) or 'COL' in shcs or 'PER' in shcs or 'FRO' in shcs or 'ICE' in shcs:
         return 'PER/COL', weight
     
     # If we can't classify with confidence, log it
