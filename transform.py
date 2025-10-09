@@ -22,7 +22,7 @@ def classify_cargo(row, unclassified_log):
     if 'meat' in nature_goods or 'PEM' in shcs:
         return 'MEAT', weight
     
-    if 'fish' in nature_goods or 'PES' in shcs:
+    if 'fish' in nature_goods or 'tropical' in nature_goods or 'PES' in shcs:
         # Special case for crabs/lobster
         if any(term in nature_goods for term in ['lobster', 'crab', 'crabs']):
             return 'CRABS/LOBSTER', weight
@@ -46,7 +46,7 @@ def classify_cargo(row, unclassified_log):
     if 'valuable' in nature_goods or 'VAL' in shcs:
         return 'VALUABLES', weight
     
-    if any(term in shcs for term in ['DGR','RRY', 'RMD', 'RPB', 'RFL', 'RCG', 'RNG', 'RIS']) or 'dangerous' in nature_goods:
+    if any(term in shcs for term in ['DGR','RRY', 'RMD', 'RPB', 'RFL', 'RCG', 'RNG', 'RIS', 'RDS']) or 'dangerous' in nature_goods:
         return 'DG', weight
     
     if any(term in shcs for term in ['GEN', 'GCR','HUM', 'NWP', 'DXP', 'AVX', 'PIL']):
