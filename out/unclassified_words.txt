@@ -1,0 +1,159 @@
+
+==================================================
+Run timestamp: 2025-10-09 20:21:45
+==================================================
+AWB: 197-70473314
+Nature Goods: RELIEF SUPPLIES
+SHCs: nan
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 706-51788133
+Nature Goods: HATCHING EGGS
+SHCs: HEA HEG
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 706-51788133
+Nature Goods: HATCHING EGGS
+SHCs: HEA HEG
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 706-51788133
+Nature Goods: HATCHING EGGS
+SHCs: HEA HEG
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 157-04884574
+Nature Goods: DIPLOMATIC CARGO
+SHCs: DIP
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 197-70518136
+Nature Goods: BRUSH CUTTER PA
+SHCs: nan
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 197-70454591
+Nature Goods: MEDICALDEVICE
+SHCs: ATT
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 074-64213030
+Nature Goods: CONSOLIDATION
+SHCs: XPS EAP SPX
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 197-70503860
+Nature Goods: PERSONAL EFFECT
+SHCs: nan
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 197-70454554
+Nature Goods: PHARMAITEMS
+SHCs: ATT
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 077-39230144
+Nature Goods: DIPLOMATIC MAIL
+SHCs: DIP
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 157-04883513
+Nature Goods: 4 LIVE DOGS
+SHCs: SHU AVI AVP
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 074-03808125
+Nature Goods: DIPLOMATIC MAIL
+SHCs: XPH DIP EAP SPX
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 197-70504582
+Nature Goods: BOTTLE MOLDS
+SHCs: nan
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 197-70525313
+Nature Goods: FERTILIZER SAMP
+SHCs: nan
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 910-18287076
+Nature Goods: DIPLOMATIC BAG
+SHCs: DIP
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 197-70525291
+Nature Goods: VALVE AND TRIAC
+SHCs: nan
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 197-70505875
+Nature Goods: ELECTRICEQUIPM
+SHCs: ECC
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 197-70224991
+Nature Goods: SPAREPARTS
+SHCs: AUP
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 157-04883406
+Nature Goods: 4 LIVE CATS
+SHCs: SHU AVI HST AVP
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 197-70526632
+Nature Goods: MERCHANDISEGOO
+SHCs: ATT
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 197-70505562
+Nature Goods: DATA CABLE
+SHCs: nan
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 197-70519013
+Nature Goods: LAPTOPS
+SHCs: nan
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 197-70525453
+Nature Goods: FILTERS
+SHCs: nan
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 077-38687622
+Nature Goods: DIPLOMATIC MAIL
+SHCs: DIP
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 197-70525394
+Nature Goods: AMIS REFERENCE
+SHCs: nan
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 197-70224965
+Nature Goods: GRAVUREPRINTIN
+SHCs: ATT
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 197-70525254
+Nature Goods: POSTERS
+SHCs: nan
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 074-03868410
+Nature Goods: DIPLOMATIC MAIL
+SHCs: XPS DIP EAP SPX
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 197-70530891
+Nature Goods: WATER SAMPLE
+SHCs: nan
+Timestamp: 2025-10-09 20:21:45
+------------------------------
+AWB: 197-70535393
+Nature Goods: GENERAL MERCHANDISE
+SHCs: nan
+Timestamp: 2025-10-09 20:21:45
+------------------------------
