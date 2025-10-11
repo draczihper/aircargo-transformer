@@ -72,9 +72,6 @@ def classify_flight_category(carrier, flight_no):
     
     # PW flights
     elif carrier == 'PW':
-        if flight_no in ['717', '721']:
-            return 'PW-FOREIGN'
-        else:
             return 'DOMESTIC'
     
     # All other carriers
