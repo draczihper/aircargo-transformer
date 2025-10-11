@@ -13,14 +13,15 @@ def classify_cargo(row, unclassified_log):
     shcs = str(row['SHCs']).upper() if pd.notna(row['SHCs']) else ''
     weight = float(row['Weight']) if pd.notna(row['Weight']) else 0
     awb = str(row['AWB']) if pd.notna(row['AWB']) else ''
-    awb_dest = str(row['AWB Dest']).lower() if pd.notna(row['AWB Dest']) else ''
     import_status = str(row['Import Status']).lower() if pd.notna(row['Import Status']) else ''
+    awb_dest = str(row['AWB Dest']).lower() if pd.notna(row['AWB Dest']) else ''
     
     # Check AWB prefix for P.O.MAIL
     if awb.startswith('MAL'):
         return 'P.O.MAIL', weight
     
     # Priority 1: Specific items in Import Status and AWB Dest
+    # To know a transit cargo, check if import status is "CKD" and destination is not "DAR"
     if "CKD" in import_status and awb_dest != 'DAR':
         return 'TRANSIT', weight
 
@@ -35,7 +36,7 @@ def classify_cargo(row, unclassified_log):
     
     
     if any(term in shcs for term in ['GEN', 'GCR']):
-        return 'G. CARGO', weight
+        return 'GENCARGO', weight
     
     # Priority 2: Generic perishables
     """ perishable_terms = ['perishable', 'fresh', 'chilled', 'frozen', 'cool', 'cold']
@@ -52,7 +53,7 @@ def classify_cargo(row, unclassified_log):
         })
     
     # Default to general cargo
-    return 'G. CARGO', weight
+    return 'GENCARGO', weight
 
 def classify_flight_category(carrier, flight_no):
     """
@@ -115,6 +116,8 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
             column_mapping['Flight No.'] = col
         elif 'origin' in col_lower:
             column_mapping['Origin'] = col
+        elif 'awb' in col_lower and 'dest' in col_lower:
+            column_mapping['AWB Dest'] = col
         elif 'dest' in col_lower:
             column_mapping['Dest'] = col
         elif col_lower == 'awb' or 'awb' in col_lower:
@@ -123,8 +126,6 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
             column_mapping['Nature Goods'] = col
         elif 'import' in col_lower and 'status' in col_lower:
             column_mapping['Import Status'] = col
-        elif 'awb' in col_lower and 'dest' in col_lower:
-            column_mapping['AWB Dest'] = col
         elif 'rcv' in col_lower or 'weight' in col_lower:
             column_mapping['Weight'] = col
         elif 'shc' in col_lower:
@@ -151,10 +152,10 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
     book2_data = []
     
     # Define all category columns
-    category_columns = ['G. CARGO', 'PER/COL', 'DG', 'TRANSIT', 
-                       'P.O.MAIL', 'COURIER']
+    category_columns = ['GENCARGO', 'PER/COL', 'DG', 'TRANSIT', 
+                       'P.O MAIL', 'COURIER']
     
-    awb_columns = ['G. AWBs', 'PER/COL AWBs', 'DG AWBs', 'TRANSIT', 'COURIER AWBs']
+    awb_columns = ['GEN(awb)', 'PER/COL(awb)', 'DG(awb)', 'TRANSIT(awb)', 'COU(awb)']
     
     total_awb_count = 0
     
@@ -187,9 +188,9 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
                 'GENCARGO': 'GEN(awb)',
                 'PER/COL': 'PER/COL(awb)',
                 'DG': 'DG(awb)',
-                'TRANSIT': 'TNST(awb)',
+                'TRANSIT': 'TRANSIT(awb)',
                 'COURIER': 'COU(awb)',
-                'P.O.MAIL': 'GEN(awb)'  # P.O.MAIL counted in G. AWBs
+                'P.O MAIL': 'GEN(awb)'  # P.O MAIL counted in G. AWBs
             }
             
             if category in awb_col_mapping:
@@ -218,7 +219,7 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
     df_book2 = df_book2[column_order]
     
     # Verify AWB count
-    total_awbs_book2 = df_book2['TOTAL AWBs'].sum()
+    total_awbs_book2 = df_book2['AWB TOTAL'].sum()
     print(f"\nVerification:")
     print(f"Total AWBs in Book1: {len(df_book1)}")
     print(f"Total AWBs in Book2: {total_awbs_book2}")
