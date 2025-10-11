@@ -164,7 +164,7 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
             'DATE': flight_date,
             'AIRLINE': carrier,
             'FLIGHT No': flight_no,
-            'SECTOR': classify_flight_route(origin, dest),
+            'ROUTE': classify_flight_route(origin, dest),
             'F/CATEGORY': classify_flight_category(carrier, flight_no)
         }
         
@@ -184,18 +184,12 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
             
             # Increment AWB count for the category
             awb_col_mapping = {
-                'G. CARGO': 'G. AWBs',
-                'VALUABLES': 'VAL AWBs',
-                'VEGETABLES': 'VEGETABLES AWBs',
-                'AVOCADO': 'AVOCADO AWBs',
-                'FISH': 'FISH AWBs',
-                'MEAT': 'MEAT AWBs',
-                'COURIER': 'COURIER AWBs',
-                'CRABS/LOBSTER': 'CRAB/LOBSTER AWBs',
-                'FLOWERS': 'FLOWERS AWBs',
-                'PER/COL': 'PER/COL AWBs',
-                'DG': 'DG AWBs',
-                'P.O.MAIL': 'G. AWBs'  # P.O.MAIL counted in G. AWBs
+                'GENCARGO': 'GEN(awb)',
+                'PER/COL': 'PER/COL(awb)',
+                'DG': 'DG(awb)',
+                'TRANSIT': 'TNST(awb)',
+                'COURIER': 'COU(awb)',
+                'P.O.MAIL': 'GEN(awb)'  # P.O.MAIL counted in G. AWBs
             }
             
             if category in awb_col_mapping:
@@ -204,7 +198,7 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
             total_awb_count += 1
         
         # Calculate totals
-        row_data['TOTAL AWBs'] = len(group)  # Total AWBs for this flight
+        row_data['AWB TOTAL'] = len(group)  # Total AWBs for this flight
         row_data['TOTAL WEIGHT'] = sum(row_data[col] for col in category_columns)
         
         book2_data.append(row_data)
@@ -213,8 +207,8 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
     df_book2 = pd.DataFrame(book2_data)
     
     # Ensure all columns are in the correct order
-    column_order = ['DATE', 'AIRLINE', 'FLIGHT No', 'SECTOR', 'F/CATEGORY'] + \
-                   category_columns + awb_columns + ['TOTAL AWBs', 'TOTAL WEIGHT']
+    column_order = ['DATE', 'AIRLINE', 'FLIGHT No', 'ROUTE', 'R/CATEGORY'] + \
+                   category_columns + awb_columns + ['AWB TOTAL', 'TOTAL WEIGHT']
     
     # Add any missing columns with 0 values
     for col in column_order:
