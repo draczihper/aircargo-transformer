@@ -106,10 +106,18 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
             column_mapping['Carrier'] = col
         elif 'flight' in col_lower and ('no' in col_lower or 'number' in col_lower):
             column_mapping['Flight No.'] = col
+        elif 'origin' in col_lower:
+            column_mapping['Origin'] = col
+        elif 'dest' in col_lower:
+            column_mapping['Dest'] = col
         elif col_lower == 'awb' or 'awb' in col_lower:
             column_mapping['AWB'] = col
         elif 'nature' in col_lower and 'goods' in col_lower:
             column_mapping['Nature Goods'] = col
+        elif 'import' in col_lower and 'status' in col_lower:
+            column_mapping['Import Status'] = col
+        elif 'awb' in col_lower and 'dest' in col_lower:
+            column_mapping['AWB Dest'] = col
         elif 'rcv' in col_lower or 'weight' in col_lower:
             column_mapping['Weight'] = col
         elif 'shc' in col_lower:
