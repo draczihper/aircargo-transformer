@@ -77,6 +77,13 @@ def classify_flight_category(carrier, flight_no):
     # All other carriers
     else:
         return 'FOREIGN'
+    
+def classify_flight_route(origin, dest):
+    origin = str(origin).upper() if pd.notna(origin) else ''
+    dest = str(dest).upper() if pd.notna(dest) else ''
+
+    return origin + '-' + dest
+    
 
 def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
     """
@@ -127,7 +134,7 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
     df_book1 = df_book1.rename(columns={v: k for k, v in column_mapping.items()})
     
     # Check if we have all required columns
-    required_columns = ['Flight date', 'Carrier', 'Flight No.', 'AWB', 'Weight', 'Nature Goods', 'SHCs']
+    required_columns = ['Flight date', 'Carrier', 'Flight No.','Origin', 'Dest', 'AWB', 'Weight', 'Import Status', 'AWB Dest', 'Nature Goods', 'SHCs']
     missing_columns = [col for col in required_columns if col not in df_book1.columns]
     
     if missing_columns:
@@ -138,29 +145,26 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
     unclassified_log = []
     
     # Group by Flight date, Carrier, and Flight No
-    grouped = df_book1.groupby(['Flight date', 'Carrier', 'Flight No.'])
+    grouped = df_book1.groupby(['Flight date', 'Carrier', 'Flight No.', 'Origin', 'Dest'])
     
     # Initialize Book2 structure
     book2_data = []
     
     # Define all category columns
-    category_columns = ['G. CARGO', 'VEGETABLES', 'AVOCADO', 'FISH', 'MEAT', 
-                       'VALUABLES', 'FLOWERS', 'PER/COL', 'DG', 'CRABS/LOBSTER', 
+    category_columns = ['G. CARGO', 'PER/COL', 'DG', 'TRANSIT', 
                        'P.O.MAIL', 'COURIER']
     
-    awb_columns = ['G. AWBs', 'VAL AWBs', 'VEGETABLES AWBs', 'AVOCADO AWBs', 
-                   'FISH AWBs', 'MEAT AWBs', 'COURIER AWBs', 'CRAB/LOBSTER AWBs', 
-                   'FLOWERS AWBs', 'PER/COL AWBs', 'DG AWBs']
+    awb_columns = ['G. AWBs', 'PER/COL AWBs', 'DG AWBs', 'TRANSIT', 'COURIER AWBs']
     
     total_awb_count = 0
     
-    for (flight_date, carrier, flight_no), group in grouped:
+    for (flight_date, carrier, flight_no, origin, dest), group in grouped:
         # Initialize row for Book2
         row_data = {
             'DATE': flight_date,
             'AIRLINE': carrier,
             'FLIGHT No': flight_no,
-            'SECTOR': 0,  # Leave empty/0 as specified
+            'SECTOR': classify_flight_route(origin, dest),
             'F/CATEGORY': classify_flight_category(carrier, flight_no)
         }
         
