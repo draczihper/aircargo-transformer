@@ -13,49 +13,34 @@ def classify_cargo(row, unclassified_log):
     shcs = str(row['SHCs']).upper() if pd.notna(row['SHCs']) else ''
     weight = float(row['Weight']) if pd.notna(row['Weight']) else 0
     awb = str(row['AWB']) if pd.notna(row['AWB']) else ''
+    awb_dest = str(row['AWB Dest']).lower() if pd.notna(row['AWB Dest']) else ''
+    import_status = str(row['Import Status']).lower() if pd.notna(row['Import Status']) else ''
     
     # Check AWB prefix for P.O.MAIL
     if awb.startswith('MAL'):
         return 'P.O.MAIL', weight
     
-    # Priority 1: Specific items in Nature Goods
-    if 'meat' in nature_goods or 'PEM' in shcs:
-        return 'MEAT', weight
-    
-    if 'fish' in nature_goods or 'tropical' in nature_goods or 'PES' in shcs:
-        # Special case for crabs/lobster
-        if any(term in nature_goods for term in ['lobster', 'crab', 'crabs']):
-            return 'CRABS/LOBSTER', weight
-        return 'FISH', weight
-    
-    if any(term in nature_goods for term in ['lobster', 'crab', 'crabs']) or 'PES' in shcs:
-        return 'CRABS/LOBSTER', weight
-    
-    if 'flower' in nature_goods or 'PEF' in shcs:
-        return 'FLOWERS', weight
-    
-    if 'avocado' in nature_goods:
-        return 'AVOCADO', weight
-    
-    if 'vegetable' in nature_goods or 'vegetables' in nature_goods:
-        return 'VEGETABLES', weight
+    # Priority 1: Specific items in Import Status and AWB Dest
+    if "CKD" in import_status and awb_dest != 'DAR':
+        return 'TRANSIT', weight
+
+    if any(term in shcs for term in ['COL', 'FRO', 'CRT', 'ICE', 'ERT', 'PER']):
+        return 'PER/COL', weight
+     
+    if any(term in shcs for term in ['DGR','RRY', 'RMD', 'RPB', 'RFL', 'RCG', 'RNG', 'RIS', 'RDS']) or 'dangerous' in nature_goods:
+        return 'DG', weight
     
     if 'courier' in nature_goods or 'COU' in shcs:
         return 'COURIER', weight
     
-    if 'valuable' in nature_goods or 'VAL' in shcs:
-        return 'VALUABLES', weight
     
-    if any(term in shcs for term in ['DGR','RRY', 'RMD', 'RPB', 'RFL', 'RCG', 'RNG', 'RIS', 'RDS']) or 'dangerous' in nature_goods:
-        return 'DG', weight
-    
-    if any(term in shcs for term in ['GEN', 'GCR','HUM', 'NWP', 'DXP', 'AVX', 'PIL']):
+    if any(term in shcs for term in ['GEN', 'GCR']):
         return 'G. CARGO', weight
     
     # Priority 2: Generic perishables
-    perishable_terms = ['perishable', 'fresh', 'chilled', 'frozen', 'cool', 'cold']
+    """ perishable_terms = ['perishable', 'fresh', 'chilled', 'frozen', 'cool', 'cold']
     if any(term in nature_goods for term in perishable_terms) or 'COL' in shcs or 'PER' in shcs or 'FRO' in shcs or 'ICE' in shcs:
-        return 'PER/COL', weight
+        return 'PER/COL', weight """
     
     # If we can't classify with confidence, log it
     if nature_goods and nature_goods not in ['general cargo', 'cargo', 'general', '']:
