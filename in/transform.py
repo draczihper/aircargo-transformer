@@ -14,11 +14,11 @@ def classify_cargo(row, unclassified_log):
     weight = float(row['Weight']) if pd.notna(row['Weight']) else 0
     awb = str(row['AWB']) if pd.notna(row['AWB']) else ''
     import_status = str(row['Import Status']).lower() if pd.notna(row['Import Status']) else ''
-    awb_dest = str(row['AWB Dest']).lower() if pd.notna(row['AWB Dest']) else ''
+    awb_dest = str(row['AWB Dest']).upper() if pd.notna(row['AWB Dest']) else ''
     
     # Check AWB prefix for P.O.MAIL
     if awb.startswith('MAL'):
-        return 'P.O.MAIL', weight
+        return 'P.O MAIL', weight
     
     # Priority 1: Specific items in Import Status and AWB Dest
     # To know a transit cargo, check if import status is "CKD" and destination is not "DAR"
@@ -66,7 +66,7 @@ def classify_flight_category(carrier, flight_no):
     if carrier == 'TC':
         if flight_no.startswith('TC1'):
             return 'DOMESTIC'
-        elif flight_no.startswith('TC2') or flight_no.startswith('TC4') or flight_no.startswith('TC5   '):
+        elif flight_no.startswith('TC2') or flight_no.startswith('TC4') or flight_no.startswith('TC5'):
             return 'TC-FOREIGN'
         else:
             return 'FOREIGN'
