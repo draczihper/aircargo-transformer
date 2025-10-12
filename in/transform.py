@@ -166,7 +166,7 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
             'AIRLINE': carrier,
             'FLIGHT No': flight_no,
             'ROUTE': classify_flight_route(origin, dest),
-            'F/CATEGORY': classify_flight_category(carrier, flight_no)
+            'R/CATEGORY': classify_flight_category(carrier, flight_no)
         }
         
         # Initialize all weight and AWB count columns to 0
