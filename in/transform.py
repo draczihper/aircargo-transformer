@@ -13,8 +13,11 @@ def classify_cargo(row, unclassified_log):
     shcs = str(row['SHCs']).upper() if pd.notna(row['SHCs']) else ''
     weight = float(row['Weight']) if pd.notna(row['Weight']) else 0
     awb = str(row['AWB']) if pd.notna(row['AWB']) else ''
-    import_status = str(row['Import Status']).lower() if pd.notna(row['Import Status']) else ''
+    import_status = str(row['Import Status']).upper() if pd.notna(row['Import Status']) else ''
     awb_dest = str(row['AWB Dest']).upper() if pd.notna(row['AWB Dest']) else ''
+
+    if weight == 0:
+        return 'None', 0
     
     # Check AWB prefix for P.O.MAIL
     if awb.startswith('MAL'):
@@ -22,7 +25,7 @@ def classify_cargo(row, unclassified_log):
     
     # Priority 1: Specific items in Import Status and AWB Dest
     # To know a transit cargo, check if import status is "CKD" and destination is not "DAR"
-    if "CKD" in import_status and awb_dest != 'DAR':
+    if "CKD" in import_status and awb_dest != 'DAR' :
         return 'TRANSIT', weight
 
     if any(term in shcs for term in ['COL', 'FRO', 'CRT', 'ICE', 'ERT', 'PER']):
@@ -48,6 +51,8 @@ def classify_cargo(row, unclassified_log):
         unclassified_log.append({
             'AWB': awb,
             'Nature Goods': row['Nature Goods'],
+            'Import Status': row['Import Status'],
+            'AWB Dest': row['AWB Dest'],
             'SHCs': row['SHCs'],
             'Timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
@@ -83,7 +88,7 @@ def classify_flight_route(origin, dest):
     origin = str(origin).upper() if pd.notna(origin) else ''
     dest = str(dest).upper() if pd.notna(dest) else ''
 
-    return origin + '-' + dest
+    return f"{origin}-{dest}"
     
 
 def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
@@ -141,9 +146,21 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
     if missing_columns:
         print(f"Warning: Missing columns: {missing_columns}")
         print("Attempting to proceed with available columns...")
+        return None
     
     # Initialize list for unclassified items
     unclassified_log = []
+
+    # Attempt to count AWB before
+    total_awbs_before = len(df_book1)
+
+    # Filter out AWBs with zero weight
+    df_book1 = df_book1[df_book1['Weight'] != 0].copy()
+    awbs_filtered = total_awbs_before - len(df_book1)
+    
+    if awbs_filtered > 0:
+        print(f"Filtered out {awbs_filtered} AWBs with zero weight")
+    
     
     # Group by Flight date, Carrier, and Flight No
     grouped = df_book1.groupby(['Flight date', 'Carrier', 'Flight No.', 'Origin', 'Dest'])
@@ -157,7 +174,6 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
     
     awb_columns = ['GEN(awb)', 'PER/COL(awb)', 'DG(awb)', 'TRANSIT(awb)', 'COU(awb)']
     
-    total_awb_count = 0
     
     for (flight_date, carrier, flight_no, origin, dest), group in grouped:
         # Initialize row for Book2
@@ -178,6 +194,9 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
         # Process each AWB in the group
         for _, awb_row in group.iterrows():
             category, weight = classify_cargo(awb_row, unclassified_log)
+
+            if category is None:
+                continue
             
             # Add weight to the appropriate category
             if category in row_data:
@@ -196,7 +215,6 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
             if category in awb_col_mapping:
                 row_data[awb_col_mapping[category]] += 1
             
-            total_awb_count += 1
         
         # Calculate totals
         row_data['AWB TOTAL'] = len(group)  # Total AWBs for this flight
