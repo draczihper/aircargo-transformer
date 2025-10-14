@@ -209,8 +209,7 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
                 'DG': 'DG(awb)',
                 'TRANSIT': 'TRANSIT(awb)',
                 'COURIER': 'COU(awb)',
-                'P.O MAIL': 'GEN(awb)'  # P.O MAIL counted in G. AWBs
-            }
+            }     
             
             if category in awb_col_mapping:
                 row_data[awb_col_mapping[category]] += 1
