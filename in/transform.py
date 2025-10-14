@@ -155,6 +155,10 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
             column_mapping['Dest'] = col
         elif col_lower == 'awb':
             column_mapping['AWB'] = col
+        elif 'piece' in col_lower:
+            column_mapping['Pieces'] = col
+        elif 'uld' in col_lower and 'number' in col_lower:
+            column_mapping['ULD Number'] = col
         elif 'nature' in col_lower and 'goods' in col_lower:
             column_mapping['Nature Goods'] = col
         elif 'import' in col_lower and 'status' in col_lower:
@@ -174,7 +178,7 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
     
     # Check if we have all required columns
     required_columns = ['Flight date', 'Carrier', 'Flight No.', 'Origin', 'Dest', 
-                       'AWB', 'Weight', 'Import Status', 'AWB Dest', 'Nature Goods', 'SHCs']
+                       'AWB', 'Pieces', 'Weight', 'ULD Number', 'Import Status', 'AWB Dest', 'Nature Goods', 'SHCs']
     missing_columns = [col for col in required_columns if col not in df_book1.columns]
     
     if missing_columns:
@@ -185,15 +189,79 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
     # Initialize list for unclassified items
     unclassified_log = []
     
-    # Count AWBs before filtering
-    total_awbs_before = len(df_book1)
+    # Count rows before filtering
+    total_rows_before = len(df_book1)
     
-    # Filter out AWBs with zero weight
+    # STEP 1: Filter out unwanted Import Status (MIS, ACC, NOT)
+    excluded_statuses = ['MIS', 'ACC', 'NOT']
+    df_book1['Import Status Clean'] = df_book1['Import Status'].astype(str).str.upper().str.strip()
+    rows_before_status_filter = len(df_book1)
+    df_book1 = df_book1[~df_book1['Import Status Clean'].isin(excluded_statuses)].copy()
+    status_filtered = rows_before_status_filter - len(df_book1)
+    
+    if status_filtered > 0:
+        print(f"Filtered out {status_filtered} rows with Import Status: {excluded_statuses}")
+    
+    # STEP 2: Filter out AWBs with zero weight
+    rows_before_weight_filter = len(df_book1)
     df_book1 = df_book1[df_book1['Weight'] != 0].copy()
-    awbs_filtered = total_awbs_before - len(df_book1)
+    weight_filtered = rows_before_weight_filter - len(df_book1)
     
-    if awbs_filtered > 0:
-        print(f"Filtered out {awbs_filtered} AWBs with zero weight")
+    if weight_filtered > 0:
+        print(f"Filtered out {weight_filtered} rows with zero weight")
+    
+    # STEP 3: Remove system-generated duplicates
+    # Duplicates are identified as same Flight Date, Flight No., AWB, Pieces, Weight, and ULD Number
+    print(f"\nChecking for duplicate entries...")
+    rows_before_dedup = len(df_book1)
+    
+    # Clean ULD Number - strip whitespace
+    df_book1['ULD Number'] = df_book1['ULD Number'].astype(str).str.strip()
+    
+    # Identify duplicates based on the combination of key fields
+    duplicate_check_cols = ['Flight date', 'Flight No.', 'AWB', 'Pieces', 'Weight', 'ULD Number']
+    
+    # Find duplicates before removing them (for logging)
+    duplicates_df = df_book1[df_book1.duplicated(subset=duplicate_check_cols, keep=False)]
+    
+    # Keep only the first occurrence of each duplicate group
+    df_book1 = df_book1.drop_duplicates(subset=duplicate_check_cols, keep='first')
+    
+    duplicates_removed = rows_before_dedup - len(df_book1)
+    
+    if duplicates_removed > 0:
+        print(f"Removed {duplicates_removed} duplicate rows (same Flight Date, Flight No., AWB, Pieces, Weight, ULD)")
+        
+        # Log duplicates to file
+        if len(duplicates_df) > 0:
+            duplicate_log_filename = 'duplicate_entries.txt'
+            with open(duplicate_log_filename, 'w') as f:
+                f.write(f"Duplicate Entries Report\n")
+                f.write(f"Run timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"{'='*80}\n\n")
+                f.write(f"Total duplicate rows found: {len(duplicates_df)}\n")
+                f.write(f"Unique duplicate groups: {duplicates_removed}\n\n")
+                f.write(f"{'='*80}\n\n")
+                
+                # Group duplicates by the key fields
+                for _, group in duplicates_df.groupby(duplicate_check_cols):
+                    if len(group) > 1:
+                        f.write(f"Duplicate Group (appeared {len(group)} times):\n")
+                        f.write(f"  Flight Date: {group.iloc[0]['Flight date']}\n")
+                        f.write(f"  Flight No.: {group.iloc[0]['Flight No.']}\n")
+                        f.write(f"  AWB: {group.iloc[0]['AWB']}\n")
+                        f.write(f"  Pieces: {group.iloc[0]['Pieces']}\n")
+                        f.write(f"  Weight: {group.iloc[0]['Weight']}\n")
+                        f.write(f"  ULD Number: {group.iloc[0]['ULD Number']}\n")
+                        f.write(f"{'-'*80}\n")
+            
+            print(f"Duplicate details logged to {duplicate_log_filename}")
+    
+    print(f"\nTotal rows filtered: {total_rows_before - len(df_book1)}")
+    print(f"  - Import Status (MIS/ACC/NOT): {status_filtered}")
+    print(f"  - Zero weight: {weight_filtered}")
+    print(f"  - Duplicates: {duplicates_removed}")
+    print(f"Remaining rows to process: {len(df_book1)}\n")
     
     # Group by Flight date, Carrier, Flight No., Origin, and Dest
     grouped = df_book1.groupby(['Flight date', 'Carrier', 'Flight No.', 'Origin', 'Dest'])
@@ -298,7 +366,7 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
     # Verify AWB count (excluding P.O MAIL)
     total_awbs_book2 = df_book2['AWB TOTAL'].sum()
     print(f"\nVerification:")
-    print(f"Total rows in Book1 (after filtering zero weight): {len(df_book1)}")
+    print(f"Total rows processed (after all filters): {len(df_book1)}")
     print(f"Total unique AWBs in Book2 (excluding P.O MAIL): {total_awbs_book2}")
     
     # Save Book2
@@ -359,5 +427,6 @@ if __name__ == "__main__":
         print("Files created:")
         print("  - Book2.xlsx (transformed data)")
         print("  - unclassified_words.txt (log file, if any unclassified items)")
+        print("  - duplicate_entries.txt (log file, if any duplicates found)")
     else:
         print("\nTransformation failed - check error messages above.")
