@@ -29,6 +29,16 @@ df['SHCs'] = df['SHCs'].astype(str).str.upper()
 #  2️⃣ CLASSIFICATION LOGIC
 # =========================
 
+def categorize_route(flight_no):
+    """Categorize route based on flight number"""
+    flight_no = str(flight_no).upper()
+    if flight_no.startswith('TC1') or flight_no.startswith('PW'):
+        return 'DOMESTIC'
+    elif flight_no.startswith('TC2') or flight_no.startswith('TC4') or flight_no.startswith('TC5'):
+        return 'TC-FOREIGN'
+
+    return 'FOREIGN'
+
 def classify(row):
     shc = row['SHCs']
     awb = str(row['AWB']).upper()
