@@ -4,7 +4,7 @@ from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
 
-def classify_cargo(row, unclassified_log):
+def classify_cargo(row, unclassified_log, transit_conflict_log):
     """
     Classify cargo based on STRICT PRIORITY ORDER:
     1. TRANSIT (highest priority)
@@ -30,9 +30,27 @@ def classify_cargo(row, unclassified_log):
     
     # PRIORITY 1: TRANSIT (HIGHEST PRIORITY)
     # Transit = Import Status contains "CKD" AND AWB Dest is NOT "DAR"
-    # This overrides ALL other classifications including SHCs
-    if 'CKD' in import_status and awb_dest != 'DAR':
+    # Log if only one condition is true (transit conflict)
+    has_ckd = 'CKD' in import_status
+    dest_not_dar = awb_dest != 'DAR' and awb_dest != ''
+    
+    if has_ckd and dest_not_dar:
+        # Both conditions true - it's TRANSIT
         return 'TRANSIT', weight
+    elif has_ckd or dest_not_dar:
+        # Only one condition true - log as transit conflict
+        transit_conflict_log.append({
+            'AWB': awb,
+            'Import Status': row['Import Status'],
+            'AWB Dest': row['AWB Dest'],
+            'Has CKD': has_ckd,
+            'Dest Not DAR': dest_not_dar,
+            'Weight': weight,
+            'Nature Goods': row['Nature Goods'],
+            'SHCs': row['SHCs'],
+            'Reason': 'CKD without non-DAR destination' if has_ckd else 'Non-DAR destination without CKD',
+            'Timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
     
     # PRIORITY 2: P.O MAIL
     # Check AWB prefix for P.O.MAIL
@@ -186,8 +204,9 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
         print(f"Available columns: {list(df_book1.columns)}")
         return None
     
-    # Initialize list for unclassified items
+    # Initialize lists for logging
     unclassified_log = []
+    transit_conflict_log = []
     
     # Count rows before filtering
     total_rows_before = len(df_book1)
@@ -210,16 +229,20 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
     if weight_filtered > 0:
         print(f"Filtered out {weight_filtered} rows with zero weight")
     
-    # STEP 3: Remove system-generated duplicates
-    # Duplicates are identified as same Flight Date, Flight No., AWB, Pieces, Weight, and ULD Number
-    print(f"\nChecking for duplicate entries...")
+    # STEP 3: Remove system-generated duplicates with STRICT matching
+    # Duplicates are identified as same: Flight Date, Flight No., AWB, Pieces, Weight, ULD Number, Nature Goods, SHCs
+    print(f"\nChecking for duplicate entries (strict matching)...")
     rows_before_dedup = len(df_book1)
     
     # Clean ULD Number - strip whitespace
     df_book1['ULD Number'] = df_book1['ULD Number'].astype(str).str.strip()
     
-    # Identify duplicates based on the combination of key fields
-    duplicate_check_cols = ['Flight date', 'Flight No.', 'AWB', 'Pieces', 'Weight', 'ULD Number']
+    # Clean Nature Goods and SHCs for comparison
+    df_book1['Nature Goods Clean'] = df_book1['Nature Goods'].astype(str).str.strip().str.lower()
+    df_book1['SHCs Clean'] = df_book1['SHCs'].astype(str).str.strip().str.upper()
+    
+    # Identify duplicates based on the combination of ALL key fields (STRICT)
+    duplicate_check_cols = ['Flight date', 'Flight No.', 'AWB', 'Pieces', 'Weight', 'ULD Number', 'Nature Goods Clean', 'SHCs Clean']
     
     # Find duplicates before removing them (for logging)
     duplicates_df = df_book1[df_book1.duplicated(subset=duplicate_check_cols, keep=False)]
@@ -230,18 +253,19 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
     duplicates_removed = rows_before_dedup - len(df_book1)
     
     if duplicates_removed > 0:
-        print(f"Removed {duplicates_removed} duplicate rows (same Flight Date, Flight No., AWB, Pieces, Weight, ULD)")
+        print(f"Removed {duplicates_removed} duplicate rows (strict matching: Flight Date, Flight No., AWB, Pieces, Weight, ULD, Nature Goods, SHCs)")
         
         # Log duplicates to file
         if len(duplicates_df) > 0:
             duplicate_log_filename = 'duplicate_entries.txt'
             with open(duplicate_log_filename, 'w') as f:
-                f.write(f"Duplicate Entries Report\n")
+                f.write(f"Duplicate Entries Report (Strict Matching)\n")
                 f.write(f"Run timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"{'='*80}\n\n")
+                f.write(f"{'='*100}\n\n")
                 f.write(f"Total duplicate rows found: {len(duplicates_df)}\n")
-                f.write(f"Unique duplicate groups: {duplicates_removed}\n\n")
-                f.write(f"{'='*80}\n\n")
+                f.write(f"Duplicate groups removed: {duplicates_removed}\n\n")
+                f.write(f"Matching criteria: Flight Date, Flight No., AWB, Pieces, Weight, ULD Number, Nature Goods, SHCs\n")
+                f.write(f"{'='*100}\n\n")
                 
                 # Group duplicates by the key fields
                 for _, group in duplicates_df.groupby(duplicate_check_cols):
@@ -253,7 +277,11 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
                         f.write(f"  Pieces: {group.iloc[0]['Pieces']}\n")
                         f.write(f"  Weight: {group.iloc[0]['Weight']}\n")
                         f.write(f"  ULD Number: {group.iloc[0]['ULD Number']}\n")
-                        f.write(f"{'-'*80}\n")
+                        f.write(f"  Nature Goods: {group.iloc[0]['Nature Goods']}\n")
+                        f.write(f"  SHCs: {group.iloc[0]['SHCs']}\n")
+                        f.write(f"  Import Status: {group.iloc[0]['Import Status']}\n")
+                        f.write(f"  AWB Dest: {group.iloc[0]['AWB Dest']}\n")
+                        f.write(f"{'-'*100}\n")
             
             print(f"Duplicate details logged to {duplicate_log_filename}")
     
@@ -310,7 +338,7 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
         
         # Process each AWB in the group
         for _, awb_row in group.iterrows():
-            category, weight = classify_cargo(awb_row, unclassified_log)
+            category, weight = classify_cargo(awb_row, unclassified_log, transit_conflict_log)
             
             # Skip if category is None (zero weight AWBs)
             if category is None:
@@ -373,6 +401,34 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
     df_book2.to_excel(output_file, index=False)
     print(f"\nBook2 saved to {output_file}")
     
+    # Save transit conflict log
+    if transit_conflict_log:
+        transit_log_filename = 'transit_conflicts.txt'
+        with open(transit_log_filename, 'w') as f:
+            f.write(f"Transit Conflict Report\n")
+            f.write(f"Run timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"{'='*100}\n\n")
+            f.write(f"Total transit conflicts found: {len(transit_conflict_log)}\n")
+            f.write(f"These AWBs have only ONE of the two required conditions for TRANSIT classification:\n")
+            f.write(f"  1. Import Status contains 'CKD'\n")
+            f.write(f"  2. AWB Dest is NOT 'DAR'\n\n")
+            f.write(f"{'='*100}\n\n")
+            
+            for item in transit_conflict_log:
+                f.write(f"AWB: {item['AWB']}\n")
+                f.write(f"  Import Status: {item['Import Status']} (Has CKD: {item['Has CKD']})\n")
+                f.write(f"  AWB Dest: {item['AWB Dest']} (Not DAR: {item['Dest Not DAR']})\n")
+                f.write(f"  Conflict Reason: {item['Reason']}\n")
+                f.write(f"  Weight: {item['Weight']}\n")
+                f.write(f"  Nature Goods: {item['Nature Goods']}\n")
+                f.write(f"  SHCs: {item['SHCs']}\n")
+                f.write(f"  Timestamp: {item['Timestamp']}\n")
+                f.write(f"{'-'*100}\n")
+        
+        print(f"Transit conflicts logged to {transit_log_filename} ({len(transit_conflict_log)} items)")
+    else:
+        print("No transit conflicts found.")
+    
     # Save unclassified log
     if unclassified_log:
         log_filename = 'unclassified_words.txt'
@@ -428,5 +484,6 @@ if __name__ == "__main__":
         print("  - Book2.xlsx (transformed data)")
         print("  - unclassified_words.txt (log file, if any unclassified items)")
         print("  - duplicate_entries.txt (log file, if any duplicates found)")
+        print("  - transit_conflicts.txt (log file, if any transit conflicts found)")
     else:
         print("\nTransformation failed - check error messages above.")
