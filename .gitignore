@@ -1,2 +1,4 @@
 *.xlsx
-/unclassified_words.txt
+**/unclassified_words.txt
+**/transit_conflict*.txt
+*/dup*
