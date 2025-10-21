@@ -1,209 +1,393 @@
+"""
+Air Cargo Import Data Transformation
+Generates Book2.xlsx and log files from Book1.xlsx
+
+Usage:
+    python air_cargo_transform.py /path/to/Book1.xlsx /path/to/Book2.xlsx
+
+Outputs produced in the same working directory:
+ - Book2.xlsx
+ - duplicate_entries.txt
+ - transit_conflicts.txt
+ - unclassified_words.txt
+
+This script follows the specification provided: strict filtering, priority classification,
+unique AWB counting (sets), and required logs and console summaries.
+"""
+
+import sys
 import pandas as pd
 import numpy as np
+from datetime import datetime
+import warnings
+import re
+warnings.filterwarnings('ignore')
 
-# =========================
-#  1️⃣ INITIAL SETUP
-# =========================
+GENERIC_TERMS = set(["general cargo","cargo","general","gen"])
 
-input_file = "Book1.xlsx"
-output_file = "Book2.xlsx"
-transit_conflict_file = "transit_conflict.txt"
+# ---- Column normalization / mapping helper ----
+def map_columns(df):
+    # create a mapping from lower -> actual
+    cols = {c.lower().strip(): c for c in df.columns}
+    def find(preferred_names):
+        for name in preferred_names:
+            key = name.lower()
+            if key in cols:
+                return cols[key]
+        return None
 
-# Clear previous transit conflict log
-open(transit_conflict_file, "w").close()
+    mapping = {
+        'flight_date': find(['Flight Date','flight date','flight_date','date']),
+        'carrier': find(['Carrier','carrier','airline']),
+        'flight_no': find(['Flight No','Flight No.','flight no','flight_no','flight']),
+        'origin': find(['Origin','origin','org']),
+        'dest': find(['Dest','Destination','dest','destination']),
+        'awb': find(['AWB','Awb','awb_number','awb']),
+        'pieces': find(['Pieces','pieces','pcs']),
+        'weight': find(['Weight','weight','kg']),
+        'uld': find(['ULD Number','ULD','uld number','uld_number','uld_no']),
+        'import_status': find(['Import Status','Import_Status','import status','status']),
+        'awb_dest': find(['AWB Dest','AWB Destination','awb dest','awb_dest','final destination']),
+        'nature_goods': find(['Nature Goods','nature goods','nature_goods','description']),
+        'shcs': find(['SHCs','SHC','shcs','shc','special handling codes'])
+    }
 
-# Read Excel file
-df = pd.read_excel(input_file)
-df.columns = df.columns.str.strip()  # Clean up header whitespace
+    # verify
+    missing = [k for k,v in mapping.items() if v is None]
+    if missing:
+        raise ValueError(f"Missing required columns (couldn't map): {missing}")
 
-# Filter out zero weight rows
-df = df[df['Weight'] > 0]
+    # rename dataframe for convenience
+    df = df.rename(columns={v:k for k,v in mapping.items() if v is not None})
+    return df
 
-# Build ROUTE column
-df['ROUTE'] = df['Origin'].str.upper() + "-" + df['Dest'].str.upper()
+# ---- Flight route and category ----
+def classify_flight_route(origin, dest):
+    if pd.isna(origin): origin = ''
+    if pd.isna(dest): dest = ''
+    return f"{str(origin).strip().upper()}-{str(dest).strip().upper()}"
 
-# Ensure SHCs uppercase and string
-df['SHCs'] = df['SHCs'].astype(str).str.upper()
-
-# =========================
-#  2️⃣ CLASSIFICATION LOGIC
-# =========================
-
-def categorize_route(flight_no):
-    """Categorize route based on flight number"""
-    flight_no = str(flight_no).upper()
-    if flight_no.startswith('TC1') or flight_no.startswith('PW'):
+def classify_flight_category(carrier, flight_no):
+    c = '' if pd.isna(carrier) else str(carrier).strip().upper()
+    fn = '' if pd.isna(flight_no) else str(flight_no).strip().upper()
+    # PW carrier always DOMESTIC
+    if c == 'PW':
         return 'DOMESTIC'
-    elif flight_no.startswith('TC2') or flight_no.startswith('TC4') or flight_no.startswith('TC5'):
-        return 'TC-FOREIGN'
-
+    if c == 'TC':
+        # flight number may include letters then digits
+        if fn.startswith('TC1'):
+            return 'DOMESTIC'
+        if fn.startswith('TC2') or fn.startswith('TC4') or fn.startswith('TC5'):
+            return 'TC-FOREIGN'
+        return 'FOREIGN'
+    # default
     return 'FOREIGN'
 
-def classify(row):
-    shc = row['SHCs']
-    awb = str(row['AWB']).upper()
-    import_status = str(row['Import Status']).upper()
-    awb_dest = str(row['AWB Dest']).upper()
+# ---- Classification priority helper ----
+PRIORITY_ORDER = ['TRANSIT','P.O MAIL','COURIER','PER/COL','DG','GENCARGO']
+
+PER_COL_SHCS = set(['COL','FRO','CRT','ICE','ERT','PER','PEF','PES','PEM'])
+PER_COL_KEYWORDS = set(['perishable','fresh','chilled','frozen','cool','cold','flower','fish','meat','vegetable','fruit','avocado'])
+
+DG_SHCS = set(['DGR','RRY','RMD','RPB','RFL','RCG','RNG','RIS','RDS'])
+
+COURIER_KEYWORDS = set(['courier'])
+
+GEN_SHCS = set(['GEN','GCR'])
+
+# normalize SHCs string into a set of uppercase tokens
+
+def shc_tokens(shc_field):
+    if pd.isna(shc_field):
+        return set()
+    # split by any non-alphanumeric
+    parts = re.split(r'[\s,;|/]+', str(shc_field).upper())
+    parts = [p.strip() for p in parts if p.strip()!='']
+    return set(parts)
+
+# ---- classify a group of rows for a single AWB (ensures one AWB one category) ----
+
+def classify_awb_group(rows, transit_conflicts, unclassified_entries):
+    # rows: DataFrame of all rows with same AWB (within flight)
+    # We determine category by scanning rows and applying highest priority hit
+    has_ckd = False
+    dests = set()
+    awb_value = rows.name if hasattr(rows,'name') else None
+    any_shcs = set()
+    any_nature = []
+    any_weights = rows['weight'].fillna(0).astype(float).sum()
+
+    for _, r in rows.iterrows():
+        imp = '' if pd.isna(r.get('import_status','')) else str(r.get('import_status','')).upper()
+        if 'CKD' in imp:
+            has_ckd = True
+        awb_dest = '' if pd.isna(r.get('awb_dest','')) else str(r.get('awb_dest','')).strip().upper()
+        dests.add(awb_dest)
+        any_shcs |= shc_tokens(r.get('shcs',''))
+        ng = '' if pd.isna(r.get('nature_goods','')) else str(r.get('nature_goods',''))
+        any_nature.append(ng)
+
+    # transit logic: CKD present AND any AWB Dest != 'DAR'
+    dest_not_dar = any([d!='DAR' and d!='' for d in dests])
+    if has_ckd and dest_not_dar:
+        category = 'TRANSIT'
+        return category, any_weights
+    # log transit conflict if only one condition true
+    if (has_ckd ^ dest_not_dar):
+        # choose representative row for logging
+        r0 = rows.iloc[0]
+        transit_conflicts.append({
+            'AWB': awb_value,
+            'Has_CKD': bool(has_ckd),
+            'Dest_Not_DAR': bool(dest_not_dar),
+            'Import_Status': r0.get('import_status',''),
+            'AWB_Dests': list(dests),
+            'Weight': any_weights,
+            'Nature_Goods': '; '.join([n for n in any_nature if str(n).strip()!='']),
+            'SHCs': ' '.join(sorted(list(any_shcs)))
+        })
+
+    # P.O MAIL check (AWB starts with MAL)
+    if isinstance(awb_value,str) and awb_value.strip().upper().startswith('MAL'):
+        return 'P.O MAIL', any_weights
 
     # COURIER
-    if 'COU' in shc:
-        return 'COURIER'
-
-    # P.O MAIL
-    if awb.startswith('MAL'):
-        return 'P.O MAIL'
-
-    # DG
-    dg_codes = ['DGR', 'RRY', 'RMD', 'RPB', 'RFL', 'RCG', 'RNG', 'RIS', 'RDS', 'RCL']
-    if any(code in shc for code in dg_codes):
-        return 'DG'
+    if any_shcs & set(['COU']) or any([('courier' in str(n).lower()) for n in any_nature]):
+        return 'COURIER', any_weights
 
     # PER/COL
-    per_codes = ['COL', 'FRO', 'CRT', 'ICE', 'ERT', 'PER']
-    if any(code in shc for code in per_codes):
-        return 'PER/COL'
+    if any_shcs & PER_COL_SHCS or any([any(k in str(n).lower() for k in PER_COL_KEYWORDS) for n in any_nature]):
+        return 'PER/COL', any_weights
 
-    # TRANSIT strict check
-    if import_status == 'CKD' and awb_dest != 'DAR':
-        return 'TRANSIT'
-    elif import_status == 'CKD' or awb_dest != 'DAR':
-        # Log conflicting potential transit records
-        with open(transit_conflict_file, "a", encoding="utf-8") as f:
-            f.write(f"{row['AWB']}, Import Status: {import_status}, AWB Dest: {awb_dest}\n")
+    # DG
+    if any_shcs & DG_SHCS or any([('dangerous' in str(n).lower()) for n in any_nature]):
+        return 'DG', any_weights
 
-    # Default: General Cargo
-    return 'GENCARGO'
+    # GENCARGO
+    # If no helpful SHC and nature goods is generic/empty -> consider unclassified for review
+    nature_combined = ' '.join([str(n) for n in any_nature if str(n).strip()!='']).strip().lower()
+    if (len(any_shcs)==0) and (nature_combined=='' or any(term in nature_combined for term in GENERIC_TERMS)):
+        # log as unclassified
+        r0 = rows.iloc[0]
+        unclassified_entries.append({
+            'AWB': awb_value,
+            'Nature_Goods': r0.get('nature_goods',''),
+            'SHCs': ' '.join(sorted(list(any_shcs))),
+            'Import_Status': r0.get('import_status',''),
+            'AWB_Dest': ';'.join(list(dests)),
+            'Weight': any_weights
+        })
 
-df['CATEGORY'] = df.apply(classify, axis=1)
+    return 'GENCARGO', any_weights
 
-# =========================
-#  3️⃣ SETUP COLUMNS
-# =========================
+# ---- Main transform function ----
 
-weight_cols = [
-    'GENCARGO',
-    'PER/COL',
-    'DG',
-    'TRANSIT',
-    'P.O MAIL',
-    'COURIER'
-]
+def transform_data(input_file, output_file='Book2.xlsx'):
+    # Read
+    df = pd.read_excel(input_file, dtype=str)
+    total_rows = len(df)
+    print(f"Total rows read: {total_rows}")
 
-awb_cols = [
-    'GEN(awb)',
-    'COL(awb)',
-    'DG(awb)',
-    'TRANSIT(awb)',
-    'COU(awb)'
-]
+    # Clean colnames and map
+    try:
+        df = map_columns(df)
+    except Exception as e:
+        print(f"ERROR: {e}")
+        return None
 
-# Initialize columns with proper dtypes
-for col in weight_cols:
-    df[col] = 0.0
+    # normalize fields
+    for c in ['awb','uld','import_status','awb_dest','nature_goods','shcs']:
+        if c in df.columns:
+            df[c] = df[c].astype(str).replace('nan','').fillna('').apply(lambda x: x.strip())
 
-for col in awb_cols:
-    df[col] = 0
+    # parse weight and pieces
+    df['weight'] = pd.to_numeric(df['weight'], errors='coerce').fillna(0).astype(float)
+    df['pieces'] = pd.to_numeric(df['pieces'], errors='coerce').fillna(0).astype(int)
 
-# =========================
-#  4️⃣ ASSIGN WEIGHT & AWB COUNTS
-# =========================
+    # Date handling: extract date only
+    df['flight_date'] = pd.to_datetime(df['flight_date'], errors='coerce')
+    df['flight_date_only'] = df['flight_date'].dt.date
 
-for i, row in df.iterrows():
-    cat = row['CATEGORY']
-    weight = row['Weight']
+    # Filter statuses
+    status_exclude = set(['MIS','ACC','NOT'])
+    before_status = len(df)
+    df['import_status_clean'] = df['import_status'].str.upper().fillna('')
+    df = df[~df['import_status_clean'].isin(status_exclude)].copy()
+    after_status = len(df)
+    print(f"Rows removed by status filter: {before_status - after_status}")
 
-    if cat in weight_cols:
-        df.at[i, cat] = weight
+    # Filter zero weight
+    before_w = len(df)
+    df = df[df['weight'] != 0].copy()
+    after_w = len(df)
+    print(f"Rows removed by zero weight: {before_w - after_w}")
 
-    # AWB counting by category
-    if cat == 'GENCARGO':
-        df.at[i, 'GEN(awb)'] = 1
-    elif cat == 'PER/COL':
-        df.at[i, 'COL(awb)'] = 1
-    elif cat == 'DG':
-        df.at[i, 'DG(awb)'] = 1
-    elif cat == 'TRANSIT':
-        df.at[i, 'TRANSIT(awb)'] = 1
-    elif cat == 'COURIER':
-        df.at[i, 'COU(awb)'] = 1
-    # 'P.O MAIL' doesn't have separate awb column
+    # Remove strict duplicates
+    dup_subset = ['flight_date_only','flight_no','awb','pieces','weight','uld','nature_goods','shcs']
+    # Ensure fields exist
+    for col in dup_subset:
+        if col not in df.columns:
+            df[col] = ''
+    duplicated_mask = df.duplicated(subset=dup_subset, keep='first')
+    duplicates = df[duplicated_mask].copy()
+    df = df[~duplicated_mask].copy()
+    print(f"Duplicate rows found (strict): {len(duplicates)}")
 
-# =========================
-#  5️⃣ GROUPING & AGGREGATION
-# =========================
+    # Prepare logs
+    dup_log_entries = []
+    for _, r in duplicates.iterrows():
+        dup_log_entries.append({
+            'Flight Date': str(r['flight_date_only']),
+            'Flight No': r.get('flight_no',''),
+            'AWB': r.get('awb',''),
+            'Pieces': r.get('pieces',''),
+            'Weight': r.get('weight',''),
+            'ULD': r.get('uld',''),
+            'Nature Goods': r.get('nature_goods',''),
+            'SHCs': r.get('shcs',''),
+            'Import Status': r.get('import_status',''),
+            'AWB Dest': r.get('awb_dest','')
+        })
 
-group_cols = ['Flight Date', 'Carrier', 'Flight Number', 'ROUTE']
-agg_dict = {col: 'sum' for col in weight_cols + awb_cols}
+    # Group by flight
+    group_cols = ['flight_date_only','carrier','flight_no','origin','dest']
+    for c in group_cols:
+        if c not in df.columns:
+            df[c] = ''
 
-grouped = df.groupby(group_cols).agg(agg_dict).reset_index()
+    flights = []
 
-# =========================
-#  6️⃣ R/CATEGORY LOGIC
-# =========================
+    transit_conflicts = []
+    unclassified_entries = []
 
-def categorize_route(airline):
-    airline = str(airline).upper()
-    if airline.startswith('TC1') or airline.startswith('PW'):
-        return 'DOMESTIC'
-    elif airline.startswith('TC2') or airline.startswith('TC4') or airline.startswith('TC5'):
-        return 'TC-FOREIGN'
-    else:
-        return 'FOREIGN'
+    flights_processed = 0
+    total_weight_sum = 0.0
+    unique_awbs_global = set()
 
-grouped['R/CATEGORY'] = grouped['Carrier'].apply(categorize_route)
+    # iterate groups
+    gb = df.groupby(group_cols, dropna=False)
+    for flight_id, sub in gb:
+        flights_processed += 1
+        flight_date_only, carrier, flight_no, origin, dest = flight_id
+        route = classify_flight_route(origin, dest)
+        r_category = classify_flight_category(carrier, flight_no)
 
-# =========================
-#  7️⃣ TOTALS & COLUMN ORDER
-# =========================
+        # Prepare counters
+        weights = {'GENCARGO':0.0,'PER/COL':0.0,'DG':0.0,'TRANSIT':0.0,'P.O MAIL':0.0,'COURIER':0.0}
+        awb_sets = {'GENCARGO':set(),'PER/COL':set(),'DG':set(),'TRANSIT':set(),'COURIER':set()}
 
-grouped['AWB TOTAL'] = (
-    grouped['GEN(awb)'] +
-    grouped['COL(awb)'] +
-    grouped['DG(awb)'] +
-    grouped['TRANSIT(awb)'] +
-    grouped['COU(awb)']
-)
+        # group by AWB
+        sub_awb_groups = sub.groupby('awb', dropna=False)
+        for awb, awb_rows in sub_awb_groups:
+            # classify awb by all its rows
+            cat, w = classify_awb_group(awb_rows, transit_conflicts, unclassified_entries)
+            # add weight to category
+            if pd.isna(w): w = 0.0
+            weights[cat] = weights.get(cat,0.0) + float(w)
+            # Unique AWB counting
+            if cat != 'P.O MAIL':
+                if awb is not None and str(awb).strip()!='':
+                    awb_sets[cat].add(str(awb).strip())
+                    unique_awbs_global.add(str(awb).strip())
+            # P.O MAIL excluded from AWB counts per rules
+            total_weight_sum += float(w)
 
-grouped['TOTAL WEIGHT'] = grouped[weight_cols].sum(axis=1)
+        # compute AWB counts
+        awb_counts = {k: len(v) for k,v in awb_sets.items()}
+        awb_total = sum(awb_counts.values())  # excludes P.O MAIL by construction
 
-# Rename columns to match final format
-grouped = grouped.rename(columns={
-    'Flight Date': 'Date',
-    'Carrier': 'AIRLINE',
-    'Flight Number': 'FLGHTNO'
-})
+        # total weight check
+        total_weight = sum(weights.values())
 
-final_cols = [
-    'Date', 'AIRLINE', 'FLGHTNO', 'ROUTE', 'R/CATEGORY',
-    'GENCARGO', 'PER/COL', 'DG', 'TRANSIT', 'P.O MAIL', 'COURIER',
-    'GEN(awb)', 'COL(awb)', 'DG(awb)', 'TRANSIT(awb)', 'COU(awb)',
-    'AWB TOTAL', 'TOTAL WEIGHT'
-]
+        flights.append({
+            'DATE': flight_date_only,
+            'AIRLINE': carrier,
+            'FLIGHT NO': flight_no,
+            'ROUTE': route,
+            'R/CATEGORY': r_category,
+            'GENCARGO': weights['GENCARGO'],
+            'PER/COL': weights['PER/COL'],
+            'DG': weights['DG'],
+            'TRANSIT': weights['TRANSIT'],
+            'P.O MAIL': weights['P.O MAIL'],
+            'COURIER': weights['COURIER'],
+            'GEN(awb)': awb_counts['GENCARGO'],
+            'COL(awb)': awb_counts['PER/COL'],
+            'DG(awb)': awb_counts['DG'],
+            'TNST(awb)': awb_counts['TRANSIT'],
+            'COU(awb)': awb_counts['COURIER'],
+            'AWB TOTAL': awb_total,
+            'TOTAL WEIGHT': total_weight
+        })
 
-grouped = grouped[final_cols]
+    # assemble Book2
+    book2 = pd.DataFrame(flights)
+    # ensure column order
+    col_order = ['DATE','AIRLINE','FLIGHT NO','ROUTE','R/CATEGORY',
+                 'GENCARGO','PER/COL','DG','TRANSIT','P.O MAIL','COURIER',
+                 'GEN(awb)','COL(awb)','DG(awb)','TNST(awb)','COU(awb)','AWB TOTAL','TOTAL WEIGHT']
+    for c in col_order:
+        if c not in book2.columns:
+            book2[c] = 0
+    book2 = book2[col_order]
 
-# =========================
-#  8️⃣ OUTPUT
-# =========================
+    # Write output and logs
+    # Book2
+    with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+        book2.to_excel(writer, index=False, sheet_name='Flights')
 
-grouped.to_excel(output_file, index=False)
-print(f"✅ Transformation complete. File saved as: {output_file}")
-print(f"📝 Transit conflicts logged to: {transit_conflict_file}")
+    # duplicate_entries.txt
+    with open('duplicate_entries.txt','w',encoding='utf-8') as f:
+        if len(dup_log_entries)==0:
+            f.write('No strict duplicates found.\n')
+        else:
+            for d in dup_log_entries:
+                f.write('\t'.join([str(d.get(k,'')) for k in ['Flight Date','Flight No','AWB','Pieces','Weight','ULD','Nature Goods','SHCs','Import Status','AWB Dest']]) + '\n')
 
-# =========================
-#  9️⃣ TERMINAL SUMMARY
-# =========================
+    # transit_conflicts.txt
+    with open('transit_conflicts.txt','w',encoding='utf-8') as f:
+        if len(transit_conflicts)==0:
+            f.write('No transit conflicts found.\n')
+        else:
+            f.write('AWB\tHas_CKD\tDest_Not_DAR\tImport_Status\tAWB_Dests\tWeight\tNature_Goods\tSHCs\n')
+            for d in transit_conflicts:
+                f.write(f"{d['AWB']}\t{d['Has_CKD']}\t{d['Dest_Not_DAR']}\t{d['Import_Status']}\t{','.join(d['AWB_Dests'])}\t{d['Weight']}\t{d['Nature_Goods']}\t{d['SHCs']}\n")
 
-print("\n===== 📊 TRANSFORMATION SUMMARY =====")
-print(f"Total unique flights processed: {len(grouped)}")
-print(f"Total AWBs processed: {int(grouped['AWB TOTAL'].sum())}")
-print(f"Total weight processed: {grouped['TOTAL WEIGHT'].sum():,.2f} kg")
+    # unclassified_words.txt
+    with open('unclassified_words.txt','w',encoding='utf-8') as f:
+        if len(unclassified_entries)==0:
+            f.write('No unclassified AWBs found.\n')
+        else:
+            f.write('AWB\tNature_Goods\tSHCs\tImport_Status\tAWB_Dest\tWeight\n')
+            for d in unclassified_entries:
+                f.write(f"{d['AWB']}\t{d['Nature_Goods']}\t{d['SHCs']}\t{d['Import_Status']}\t{d['AWB_Dest']}\t{d['Weight']}\n")
 
-print("\nBreakdown by Category (Weight):")
-weight_sums = grouped[weight_cols].sum()
-print(weight_sums.to_string())
+    # Console verification
+    print(f"Rows remaining to process (after filtering & dedup): {len(df)}")
+    print(f"Flights processed: {flights_processed}")
+    print(f"Total unique AWBs (excluding P.O MAIL): {len([a for a in unique_awbs_global if not str(a).upper().startswith('MAL')])}")
+    print(f"Total weight across all categories: {total_weight_sum:.2f} kg")
 
-print("\nBreakdown by Category (AWBs):")
-awb_sums = grouped[awb_cols].sum()
-print(awb_sums.to_string())
-print("======================================\n")
+    # category breakdowns
+    if not book2.empty:
+        wcols = ['GENCARGO','PER/COL','DG','TRANSIT','P.O MAIL','COURIER']
+        print('\nWeight by category (kg):')
+        for c in wcols:
+            print(f"  {c}: {book2[c].sum():.2f}")
+        print('\nAWB counts by category:')
+        count_cols = ['GEN(awb)','COL(awb)','DG(awb)','TNST(awb)','COU(awb)']
+        for c in count_cols:
+            print(f"  {c}: {book2[c].sum():.0f}")
+        if book2['P.O MAIL'].sum() > 0:
+            print(f"\nP.O MAIL weight (excluded from AWB totals): {book2['P.O MAIL'].sum():.2f} kg")
+
+    print(f"Outputs written: {output_file}, duplicate_entries.txt, transit_conflicts.txt, unclassified_words.txt")
+    return book2
+
+# ---- Entry point ----
+if __name__ == '__main__':
+    input_file = 'Book1.xlsx'
+    output_file = 'Book2.xlsx'
+    print(f"Running transformation on {input_file} ...")
+    transform_data(input_file, output_file)
+
