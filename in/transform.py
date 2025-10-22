@@ -150,7 +150,7 @@ def classify_awb_group(rows, transit_conflicts, unclassified_entries):
         # Continue classification normally (transit not assigned)
 
     # P.O MAIL check (AWB starts with MAL)
-    if isinstance(awb_value, str) and awb_value.strip().upper().startswith('MAL'):
+    if isinstance(awb_value, str) and awb_value.strip().upper().startswith('MAL') or "MAIL" in any_nature or "MAL" in any_shcs:
         return 'P.O MAIL', weight_sum
 
     # COURIER
@@ -286,7 +286,7 @@ def transform_data(input_file, output_file='Book2.xlsx'):
             if pd.isna(w):
                 w = 0.0
             # --- IMPORTANT: Always add weight to category (including P.O MAIL) ---
-            weights[cat] = weights.get(cat,0.0) + float(w)
+            weights[cat] = weights.get(cat, 0.0) + float(w)
 
             # --- AWB counting: exclude P.O MAIL AWBs from any AWB sets/counts ---
             if cat != 'P.O MAIL':
