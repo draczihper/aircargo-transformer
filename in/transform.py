@@ -114,7 +114,7 @@ def classify_flight_category(carrier, flight_no):
     if carrier == 'TC':
         if flight_no.startswith('TC1'):
             return 'DOMESTIC'
-        elif flight_no.startswith('TC2') or flight_no.startswith('TC4') or flight_no.startswith('TC5'):
+        elif flight_no.startswith('TC2') or flight_no.startswith('TC4') or flight_no.startswith('TC5') or flight_no.startswith('TC05'):
             return 'TC-FOREIGN'
         else:
             return 'FOREIGN'
