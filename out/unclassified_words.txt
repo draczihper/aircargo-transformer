@@ -157,3 +157,137 @@ Nature Goods: GENERAL MERCHANDISE
 SHCs: nan
 Timestamp: 2025-10-09 20:21:45
 ------------------------------
+
+==================================================
+Run timestamp: 2025-10-23 11:57:30
+==================================================
+AWB: 157-04884585
+Nature Goods: HATCHING EGGS
+SHCs: HEA HEG
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 157-04884585
+Nature Goods: HATCHING EGGS
+SHCs: HEA HEG
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 235-00361056
+Nature Goods: LIVE DOG
+SHCs: AVI ECC EAP NSC SPX
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 197-70520785
+Nature Goods: COMPUTER MEMORY
+SHCs: nan
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 197-70525792
+Nature Goods: CONSOLIDATION
+SHCs: nan
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: HWB-13328122
+Nature Goods: HUNTED TROPHIES
+SHCs: nan
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: HWB-13328810
+Nature Goods: HUNTED TROPHIES
+SHCs: nan
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 157-04885753
+Nature Goods: 2LIVECATS
+SHCs: SHU AVI HST AVP
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 197-70521076
+Nature Goods: MIRROR LADY
+SHCs: nan
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 074-02847191
+Nature Goods: DIPLOMATIC POUC
+SHCs: XPH DIP EAP SPX
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 197-70521076
+Nature Goods: MIRROR LADY
+SHCs: nan
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 197-70521076
+Nature Goods: MIRROR LADY
+SHCs: nan
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 197-70531742
+Nature Goods: WIFI ROUTERS
+SHCs: nan
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 197-70509246
+Nature Goods: UNKWON
+SHCs: nan
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 197-70521076
+Nature Goods: MIRROR LADY
+SHCs: nan
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 197-70531742
+Nature Goods: WIFI ROUTERS
+SHCs: nan
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 910-18420824
+Nature Goods: DIPLOMATIC BAG
+SHCs: DIP
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 176-15231602
+Nature Goods: CONSOLIDATION
+SHCs: HEA SPX ECP QWT
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 077-37545384
+Nature Goods: DIPLOMATIC MAIL
+SHCs: DIP
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 157-04881446
+Nature Goods: FRUITS  VEGET
+SHCs: PEP
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 197-70538090
+Nature Goods: COURRIER
+SHCs: nan
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 197-70538090
+Nature Goods: COURRIER
+SHCs: nan
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 074-03809330
+Nature Goods: CONSOLIDATION A
+SHCs: ECC SPX EAP
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 157-03635822
+Nature Goods: DIPLOMATIC MAIL
+SHCs: DIP
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 197-70538005
+Nature Goods: LAMIVUDINEORAL
+SHCs: ATT
+Timestamp: 2025-10-23 11:57:30
+------------------------------
+AWB: 197-70531926
+Nature Goods: ONE LIVE DOG
+SHCs: AVI CRT
+Timestamp: 2025-10-23 11:57:30
+------------------------------
