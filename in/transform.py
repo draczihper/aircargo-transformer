@@ -220,12 +220,14 @@ def transform_data(input_file='Book1.xlsx', output_file='Book2.xlsx'):
     empty_awb_removed = before - len(df)
     print(f"Rows removed (empty AWB): {empty_awb_removed}")
     
+    """
+    ## DISABLED ##
     # Filter 4: HWB AWBs
     before = len(df)
     df = df[~df['AWB'].str.upper().str.startswith('HWB')].copy()
     hwb_removed = before - len(df)
     print(f"Rows removed (HWB AWBs): {hwb_removed}")
-    
+    """
     # Filter 5: Duplicates
     df['ULD Number'] = df['ULD Number'].astype(str).str.strip()
     df['Nature Goods Clean'] = df['Nature Goods'].astype(str).str.strip().str.lower()
